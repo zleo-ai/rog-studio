@@ -123,7 +123,7 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 ## 神光同步
 
-`tools/aura_sync.py` 经本机 OpenRGB（`127.0.0.1:6742`）给主板、内存、显卡推颜色，主板 30 帧，内存和显卡走 SMBus、15 帧。主色取主题标题色，副色取 `theme.css` 的 `--accent2`。管理器里换主题，灯在 1.5 秒内渐变过去。
+`tools/aura_sync.py` 经本机 OpenRGB（`127.0.0.1:6742`）给主板（含三路 ARGB，机箱风扇和灯板接在这上面；龙王冷头屏的灯归屏幕自己）、内存、显卡推颜色，主板 30 帧，内存和显卡走 SMBus、15 帧。主色取主题标题色，副色取 `theme.css` 的 `--accent2`。管理器里换主题，灯在 1.5 秒内渐变过去。
 
 需要 OpenRGB 1.0 以上。`desktop/install.sh` 在找得到 `openrgb` 时会装两个用户服务：`ryuo-openrgb`（只听 127.0.0.1）和 `ryuo-lights`。
 
@@ -139,6 +139,8 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 | `lights_on_exit` | `off` 关灯 / `keep` 停在最后一帧 |
 
 写坏的值会被忽略，沿用上一次。同步只用实时推色和临时硬件模式，从不发 OpenRGB 的 SAVEMODE。带「自动存盘」标记的设备一律跳过，写进 `lights_devices` 也不碰：本机的 Keychron 键盘就是这样，一切模式就会写进键盘自己的存储。电脑睡眠醒来会重新接管一次。
+
+管理器的「灯效」一节可以开关同步、换效果、调亮度、选同步哪些设备、改每路灯口灯数，以及关同步时灭灯还是保持原样；状态按同步程序自己写的状态文件判断，它没在跑就显示没在跑。主板灯口一个都不亮、连主板自带的彩虹效果也不亮时，先进 BIOS 看灯光开关是不是关了，不是驱动问题。
 
 ## 配置
 
@@ -205,7 +207,6 @@ powershell -ExecutionPolicy Bypass -File desktop\install_windows.ps1
 
 ## 还没做的
 
-- 管理器页面里的神光同步开关。现在只能改配置文件。
 - 键盘。OpenRGB 里标了自动存盘的设备会跳过。
 - 鼠标 ROG HARPE II ACE。OpenRGB 1.1 还不认。
 - 龙王风扇每一把的真实灯数。查不到公开数据；接口上多设几颗灯只影响流光长短。
