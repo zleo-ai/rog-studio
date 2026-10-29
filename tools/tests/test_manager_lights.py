@@ -83,24 +83,59 @@ def write_status(tmp, age, **kw):
 DEVS = [{"name": "ENE DRAM", "kind": "dram", "leds": 8}, {"name": "X870", "kind": "motherboard", "leds": 183}]
 
 
-@pytest.mark.parametrize("age,status,state", [
-    (2, {"running": True, "enabled": True, "devices": DEVS}, "syncing"),
-    (2, {"running": True, "enabled": False, "devices": DEVS}, "idle"),
-    (60, {"running": True, "enabled": True, "devices": DEVS}, "stopped"),  # 程序被杀了，状态文件还停在「在跑」
-    (10, {"running": False, "error": "Connection refused"}, "no_openrgb"),
-    (300, {"running": False, "error": "Connection refused"}, "stopped"),
-    (1, {"running": False, "enabled": True}, "stopped"),  # 正常退出
+@pytest.mark.parametrize("enabled,age,status,state", [
+    (True, 2, {"running": True, "enabled": True, "devices": DEVS}, "syncing"),
+    (False, 2, {"running": True, "enabled": False, "devices": DEVS}, "idle"),
+    (False, 2, {"running": True, "enabled": True, "devices": DEVS}, "switching"),  # 刚点了关，同步程序还没跟上
+    (True, 2, {"running": True, "enabled": True, "devices": []}, "no_devices"),  # 在跑，但一颗灯都没在推
+    (True, 60, {"running": True, "enabled": True, "devices": DEVS}, "stopped"),  # 程序被杀了，状态文件还停在「在跑」
+    (True, -3600, {"running": True, "enabled": True, "devices": DEVS}, "stopped"),  # 时间戳在未来
+    (True, 40, {"running": False, "error": "Connection refused"}, "no_openrgb"),  # 重试间隔最长约 36 秒
+    (True, 50, {"running": False, "error": "Connection refused"}, "stopped"),
+    (True, 1, {"running": False, "enabled": True}, "stopped"),  # 正常退出
 ])
-def test_status_is_what_the_daemon_wrote(mgr, age, status, state):
+def test_status_is_what_the_daemon_wrote(mgr, enabled, age, status, state):
     call, tmp = mgr
+    call("/api/conf", {"lights_enabled": enabled})
     write_status(tmp, age, **status)
     L = call("/api/state")["lights"]
     assert L["state"] == state
-    assert L["devices"] == (DEVS if state in ("syncing", "idle") else [])
+    assert L["devices"] == (status["devices"] if state in ("syncing", "idle", "switching") else [])
     assert L["error"] == ("Connection refused" if state == "no_openrgb" else "")
 
 
-@pytest.mark.parametrize("content", [None, "", "{", '{"at": "x", "running": true}', "[]"])
+def test_no_devices_selected_is_not_syncing(mgr):
+    call, tmp = mgr
+    call("/api/conf", {"lights_devices": []})
+    assert synced(tmp)["lights_devices"] == []
+    write_status(tmp, 1, running=True, enabled=True, devices=[])
+    assert call("/api/state")["lights"]["state"] == "no_devices"
+
+
+def test_mixed_and_rejected_saves_log_honestly(mgr):
+    call, _ = mgr
+    call("/api/conf", {"theme": "aurora", "lights_brightness": 30})
+    msgs = [x["msg"] for x in call("/api/state")["log"]]
+    assert any(m.startswith("灯效：") for m in msgs) and any(m.startswith("设置已保存") for m in msgs)
+    server.LOG.clear()
+    call("/api/conf", {"lights_brightness": 500})  # 被拒的值：什么都没改，就不记「灯效：…」
+    assert not any(x["msg"].startswith("灯效：") for x in call("/api/state")["log"])
+
+
+def test_concurrent_saves_keep_both(mgr):
+    call, tmp = mgr
+    bodies = [{"lights_brightness": 35}, {"theme": "aurora"}, {"lights_effect": "static"}, {"panel_width": 720}] * 5
+    ts = [threading.Thread(target=call, args=("/api/conf", b)) for b in bodies]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    raw = json.loads((tmp / "config.json").read_text())
+    assert (raw["lights_brightness"], raw["theme"], raw["lights_effect"], raw["panel_width"]) == (35, "aurora", "static", 720)
+
+
+@pytest.mark.parametrize("content", [None, "", "{", '{"at": "x", "running": true}', "[]",
+                                     '{"at": 1%s, "running": true, "enabled": true}' % ("0" * 400)])
 def test_missing_or_broken_status_is_stopped(mgr, content):
     call, tmp = mgr
     if content is not None:

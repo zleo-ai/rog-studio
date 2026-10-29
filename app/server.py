@@ -7,6 +7,7 @@
 """
 import json
 import mimetypes
+import os
 import subprocess
 import sys
 import threading
@@ -38,6 +39,7 @@ LIGHTS_STATUS = OUT / "lights.json"
 
 JOBS = {}
 LOG = []
+CONF_LOCK = threading.Lock()  # 两个请求同时改设置时，后一个不能拿着旧的那份把前一个盖掉
 RENDER_LOCK = threading.Lock()  # 无头 Chrome 共用一个配置目录，同时开两个会互相打架
 
 
@@ -55,7 +57,9 @@ def load_conf():
 
 def save_conf(c):
     CONF_DIR.mkdir(parents=True, exist_ok=True)
-    CONF.write_text(json.dumps(c, ensure_ascii=False, indent=2))
+    tmp = CONF.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(c, ensure_ascii=False, indent=2))
+    os.replace(tmp, CONF)  # 整份换上去：推送程序和神光同步随时在读，不能让它们读到半截
 
 
 def themes():
@@ -131,22 +135,30 @@ def lights_status(conf):
     try:
         st = json.loads(LIGHTS_STATUS.read_text())
         age = time.time() - float(st["at"])
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError, OverflowError):
         st, age = {}, None
+    lc = lights_conf(conf)
+    fresh = lambda limit: age is not None and 0 <= age < limit  # 时间戳在未来（时钟往回校过）也算不可信
+    devices = st.get("devices") if isinstance(st.get("devices"), list) else []
     # 跑着时每 5 秒写一次；连不上 OpenRGB 时每次重试写一次，重试间隔最长 30 秒
-    if age is not None and st.get("running") and age < 15:
-        state = "syncing" if st.get("enabled") else "idle"
-    elif age is not None and st.get("error") and age < 45:
+    if fresh(15) and st.get("running"):
+        if bool(st.get("enabled")) != lc["lights_enabled"]:
+            state = "switching"  # 刚点了开关，同步程序还没写下一次状态
+        elif not lc["lights_enabled"]:
+            state = "idle"
+        else:
+            state = "syncing" if devices else "no_devices"
+    elif fresh(45) and st.get("error"):
         state = "no_openrgb"
     else:
         state = "stopped"
-    devices = st.get("devices") if state in ("syncing", "idle") and isinstance(st.get("devices"), list) else []
-    return {"state": state, "devices": devices, "error": st.get("error", "") if state == "no_openrgb" else "",
-            "autostart": hostsys.service_autostart("lights"), "conf": lights_conf(conf)}
+    return {"state": state, "devices": devices if state in ("syncing", "idle", "switching") else [],
+            "error": str(st.get("error", "")) if state == "no_openrgb" else "",
+            "autostart": hostsys.service_autostart("lights"), "autostart_here": not hostsys.IS_WIN, "conf": lc}
 
 
 def set_lights(conf, b):
-    """只改请求里带了的灯效键；写坏的值沿用原来的。返回改了哪些键。"""
+    """只改请求里带了的灯效键；写坏的值沿用原来的。返回值真变了的键。"""
     inc = {k: b[k] for k in LIGHT_KEYS if k in b}
     v = inc.get("lights_devices")
     if v is not None and not (isinstance(v, list) and all(x in LIGHT_KINDS for x in v)):
@@ -155,9 +167,10 @@ def set_lights(conf, b):
         return []
     prev = aura_sync.clean(conf, aura_sync.DEFAULTS)
     eff = aura_sync.clean({**conf, **inc}, prev)
+    changed = [k for k in inc if eff[k] != prev[k]]
     for k in inc:
         conf[k] = eff[k]
-    return list(inc)
+    return changed
 
 
 class H(BaseHTTPRequestHandler):
@@ -220,33 +233,38 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"url": f"/out/renders/{out.name}?t={int(time.time())}"})
         return self.send(404, {"error": "not found"})
 
+    def save_settings(self, b):
+        conf = load_conf()
+        for k in ("theme", "layout", "push_minutes", "renderer", "full_show_seconds", "full_hide_seconds",
+                  "panel_width", "panel_glass", "hud"):
+            if k in b:
+                conf[k] = b[k]
+        v = b.get("hud_items")
+        if isinstance(v, list) and all(x in ("cpu", "gpu", "mem") for x in v):
+            conf["hud_items"] = v
+        for k in ("split_slots", "full_slots"):  # 屏幕自带读数：6 个固定位置，下标即位置
+            v = b.get(k)
+            if isinstance(v, list) and len(v) <= 6 and all(x in SLOT_CHOICES for x in v):
+                conf[k] = v
+        lit = set_lights(conf, b)
+        save_conf(conf)
+        if lit:
+            lc = lights_conf(conf)
+            log(f"灯效：{'同步开' if lc['lights_enabled'] else '同步关'} · "
+                f"{ {'flow': '流光', 'breathe': '呼吸', 'static': '常亮'}[lc['lights_effect']] } · 亮度 {lc['lights_brightness']}")
+        if b and not set(b) - set(LIGHT_KEYS):
+            return self.send(200, conf)  # 只改灯效时不再记一条推送设置
+        how = "实时" if conf.get("renderer", "native") == "native" else f"每 {conf['push_minutes']} 分钟推一次图"
+        log(f"设置已保存：主题 {conf['theme']} · {'分屏' if conf['layout'] == 'split' else '整屏'} · {how}")
+        return self.send(200, conf)
+
     def do_POST(self):
         p = urlparse(self.path).path
         b = self.body()
         conf = load_conf()
         if p == "/api/conf":
-            for k in ("theme", "layout", "push_minutes", "renderer", "full_show_seconds", "full_hide_seconds",
-                      "panel_width", "panel_glass", "hud"):
-                if k in b:
-                    conf[k] = b[k]
-            v = b.get("hud_items")
-            if isinstance(v, list) and all(x in ("cpu", "gpu", "mem") for x in v):
-                conf["hud_items"] = v
-            for k in ("split_slots", "full_slots"):  # 屏幕自带读数：6 个固定位置，下标即位置
-                v = b.get(k)
-                if isinstance(v, list) and len(v) <= 6 and all(x in SLOT_CHOICES for x in v):
-                    conf[k] = v
-            lit = set_lights(conf, b)
-            save_conf(conf)
-            if lit:
-                lc = lights_conf(conf)
-                log(f"灯效：{'同步开' if lc['lights_enabled'] else '同步关'} · "
-                    f"{ {'flow': '流光', 'breathe': '呼吸', 'static': '常亮'}[lc['lights_effect']] } · 亮度 {lc['lights_brightness']}")
-            if lit and not set(b) - set(LIGHT_KEYS):
-                return self.send(200, conf)  # 只改灯效时不再记一条推送设置
-            how = "实时" if conf.get("renderer", "native") == "native" else f"每 {conf['push_minutes']} 分钟推一次图"
-            log(f"设置已保存：主题 {conf['theme']} · {'分屏' if conf['layout'] == 'split' else '整屏'} · {how}")
-            return self.send(200, conf)
+            with CONF_LOCK:
+                return self.save_settings(b)
         if p == "/api/video":
             theme = b.get("theme", conf["theme"])
             tdir = ROOT / "themes" / theme

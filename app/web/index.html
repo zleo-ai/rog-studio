@@ -191,7 +191,8 @@ async function load() {
 // 状态只信同步程序自己写的状态文件：没在跑就说没在跑
 function lights(L) {
   const lc = L.conf || {}, st = L.state || "stopped";
-  const label = {syncing: "灯效在同步", idle: "灯效同步关着", no_openrgb: "灯效：连不上 OpenRGB", stopped: "灯效同步没在跑"}[st];
+  const label = {syncing: "灯效在同步", idle: "灯效同步关着", switching: "灯效正在切换", no_devices: "灯效：没有设备在同步",
+    no_openrgb: "灯效：连不上 OpenRGB", stopped: "灯效同步没在跑"}[st];
   $("#litPill").classList.toggle("on", st === "syncing");
   $("#litPill span").textContent = label;
   document.querySelectorAll("#litSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === (lc.lights_enabled ? "1" : "0")));
@@ -208,12 +209,14 @@ function lights(L) {
   for (const d of L.devices || []) cnt[d.kind] = (cnt[d.kind] || 0) + 1;
   const got = Object.entries(cnt).map(([k, c]) => (kinds[k] || k) + (c > 1 ? ` ×${c}` : "")).join("、");
   const note = {
-    syncing: `正在同步：${got || "还没认到设备"}。`,
-    idle: "同步程序在跑，但同步关着，灯是各设备自己存的样子。",
+    syncing: `正在同步：${got}。`,
+    idle: lc.lights_on_exit === "keep" ? "同步关着，灯停在关掉前的样子。" : "同步关着，灯已经灭了。（同步程序启动时就关着的话，灯是各设备自己存的样子。）",
+    switching: "刚改了开关，同步程序几秒内跟上。",
+    no_devices: devs.length ? "同步开着，但一台设备都没接上：OpenRGB 没认到选中的设备，或者它们被跳过了。" : "同步开着，但一台设备都没选。",
     no_openrgb: `同步程序连不上 OpenRGB 服务端（${L.error || "原因不明"}），会自己隔一会儿重试。`,
     stopped: "同步程序没在跑。这里改的设置会存下来，等它跑起来才生效。",
   }[st];
-  $("#litNote").textContent = note + (L.autostart ? "" : " 还没装开机自启，重启电脑后要手动再开。");
+  $("#litNote").textContent = note + (L.autostart || !L.autostart_here ? "" : " 还没装开机自启，重启电脑后要手动再开。");
 }
 let liveTimer = null;
 function liveShot() {
