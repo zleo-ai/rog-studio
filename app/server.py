@@ -128,8 +128,9 @@ def pusher_status():
     last = ""
     logf = OUT / "pusher.log"
     if logf.exists():
-        lines = [x for x in logf.read_text(errors="replace").splitlines()[-40:]
-                 if x[:2].isdigit() and "warning" not in x.lower()]
+        lines = [x for x in logf.read_text(errors="replace").splitlines()[-300:]
+                 if x[:2].isdigit() and "warning" not in x.lower()
+                 and not any(k in x for k in ("心跳写入", "开始：", "完成：", "还活着"))]
         last = lines[-1] if lines else ""
     return {"running": active, "autostart": hostsys.service_autostart("pusher"), "last": last}
 
