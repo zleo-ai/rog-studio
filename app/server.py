@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+import aura_sync  # noqa: E402
 import hostsys  # noqa: E402
 import render as render_page  # noqa: E402
 
@@ -30,6 +31,10 @@ DEFAULT_CONF = {"theme": "starship", "layout": "split", "push_minutes": 15, "dev
                 "panel_width": 634, "panel_glass": True, "hud": True, "hud_items": ["cpu", "gpu", "mem"]}
 PORT = 7788
 SLOT_CHOICES = {"", "Date&Time", "CPU Temperature", "GPU Temperature"}
+# 神光同步（tools/aura_sync.py）读同一份 config，这几个键归它；校验规则也用它自己的，两边不会各说各话
+LIGHT_KEYS = ("lights_enabled", "lights_effect", "lights_brightness", "lights_devices", "lights_argb_leds", "lights_on_exit")
+LIGHT_KINDS = ("motherboard", "dram", "gpu")  # 键盘的模式会写进它自己的存储，鼠标 OpenRGB 还不支持，都不给选
+LIGHTS_STATUS = OUT / "lights.json"
 
 JOBS = {}
 LOG = []
@@ -116,6 +121,45 @@ def pusher_status():
     return {"running": active, "autostart": hostsys.service_autostart("pusher"), "last": last}
 
 
+def lights_conf(conf):
+    c = aura_sync.clean(conf, aura_sync.DEFAULTS)  # 同步程序实际会用的值
+    return {k: c[k] for k in LIGHT_KEYS}
+
+
+def lights_status(conf):
+    """按同步程序自己写的状态文件判断，不看服务名：它可能是临时拉起来的，也可能根本没跑。"""
+    try:
+        st = json.loads(LIGHTS_STATUS.read_text())
+        age = time.time() - float(st["at"])
+    except (OSError, ValueError, TypeError, KeyError):
+        st, age = {}, None
+    # 跑着时每 5 秒写一次；连不上 OpenRGB 时每次重试写一次，重试间隔最长 30 秒
+    if age is not None and st.get("running") and age < 15:
+        state = "syncing" if st.get("enabled") else "idle"
+    elif age is not None and st.get("error") and age < 45:
+        state = "no_openrgb"
+    else:
+        state = "stopped"
+    devices = st.get("devices") if state in ("syncing", "idle") and isinstance(st.get("devices"), list) else []
+    return {"state": state, "devices": devices, "error": st.get("error", "") if state == "no_openrgb" else "",
+            "autostart": hostsys.service_autostart("lights"), "conf": lights_conf(conf)}
+
+
+def set_lights(conf, b):
+    """只改请求里带了的灯效键；写坏的值沿用原来的。返回改了哪些键。"""
+    inc = {k: b[k] for k in LIGHT_KEYS if k in b}
+    v = inc.get("lights_devices")
+    if v is not None and not (isinstance(v, list) and all(x in LIGHT_KINDS for x in v)):
+        del inc["lights_devices"]
+    if not inc:
+        return []
+    prev = aura_sync.clean(conf, aura_sync.DEFAULTS)
+    eff = aura_sync.clean({**conf, **inc}, prev)
+    for k in inc:
+        conf[k] = eff[k]
+    return list(inc)
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -158,7 +202,7 @@ class H(BaseHTTPRequestHandler):
         conf = load_conf()
         if p == "/api/state":
             return self.send(200, {"conf": conf, "themes": themes(), "device": device_status(conf),
-                                   "pusher": pusher_status(), "jobs": list(JOBS.values())[-20:], "log": LOG[-50:]})
+                                   "pusher": pusher_status(), "lights": lights_status(conf), "jobs": list(JOBS.values())[-20:], "log": LOG[-50:]})
         if p == "/api/screen":  # 真机截图：屏上实际画面，比网页效果图准
             if not conf["device_enabled"]:
                 return self.send(503, {"error": "还没允许连接屏幕"})
@@ -192,7 +236,14 @@ class H(BaseHTTPRequestHandler):
                 v = b.get(k)
                 if isinstance(v, list) and len(v) <= 6 and all(x in SLOT_CHOICES for x in v):
                     conf[k] = v
+            lit = set_lights(conf, b)
             save_conf(conf)
+            if lit:
+                lc = lights_conf(conf)
+                log(f"灯效：{'同步开' if lc['lights_enabled'] else '同步关'} · "
+                    f"{ {'flow': '流光', 'breathe': '呼吸', 'static': '常亮'}[lc['lights_effect']] } · 亮度 {lc['lights_brightness']}")
+            if lit and not set(b) - set(LIGHT_KEYS):
+                return self.send(200, conf)  # 只改灯效时不再记一条推送设置
             how = "实时" if conf.get("renderer", "native") == "native" else f"每 {conf['push_minutes']} 分钟推一次图"
             log(f"设置已保存：主题 {conf['theme']} · {'分屏' if conf['layout'] == 'split' else '整屏'} · {how}")
             return self.send(200, conf)

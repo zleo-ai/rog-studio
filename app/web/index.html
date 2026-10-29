@@ -109,6 +109,22 @@ select{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--li
     <p class="note" id="devNote"></p>
   </section>
 
+  <section>
+    <h2>灯效 <small>主板灯口（风扇、灯板）、内存和显卡跟着主题色走；键盘和鼠标不碰，龙王屏的灯归屏幕自己</small></h2>
+    <div class="row">
+      <span class="pill" id="litPill"><i></i><span>读取中</span></span>
+      <div class="seg" id="litSeg"><button data-v="1">同步开</button><button data-v="0">同步关</button></div>
+      <div class="seg" id="effSeg"><button data-v="flow">流光</button><button data-v="breathe">呼吸</button><button data-v="static">常亮</button></div>
+      <label class="f">亮度 <input type="range" id="bri" min="0" max="100" step="5"> <span id="briV"></span></label>
+    </div>
+    <div class="row">
+      <span class="f" id="litDevs">同步：<label><input type="checkbox" value="motherboard"> 主板灯口</label> <label><input type="checkbox" value="dram"> 内存</label> <label><input type="checkbox" value="gpu"> 显卡</label></span>
+      <label class="f">每路灯口 <select id="argb"><option>30</option><option>45</option><option>60</option><option>90</option><option>120</option></select> 颗灯</label>
+      <div class="seg" id="exitSeg"><button data-v="off">关同步时灭灯</button><button data-v="keep">关同步时保持原样</button></div>
+    </div>
+    <p class="note" id="litNote"></p>
+  </section>
+
   <section class="log">
     <h2>动态</h2>
     <ul id="log"></ul>
@@ -170,6 +186,34 @@ async function load() {
   document.querySelectorAll("#hudItems input").forEach(x => x.checked = items.includes(x.value));
   document.querySelectorAll(".slotOpt").forEach(x => x.hidden = hudOn);
   $("#widthOpt").hidden = rend !== "native";
+  lights(S.lights || {});
+}
+// 状态只信同步程序自己写的状态文件：没在跑就说没在跑
+function lights(L) {
+  const lc = L.conf || {}, st = L.state || "stopped";
+  const label = {syncing: "灯效在同步", idle: "灯效同步关着", no_openrgb: "灯效：连不上 OpenRGB", stopped: "灯效同步没在跑"}[st];
+  $("#litPill").classList.toggle("on", st === "syncing");
+  $("#litPill span").textContent = label;
+  document.querySelectorAll("#litSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === (lc.lights_enabled ? "1" : "0")));
+  document.querySelectorAll("#effSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === lc.lights_effect));
+  document.querySelectorAll("#exitSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === lc.lights_on_exit));
+  if (document.activeElement !== $("#bri")) $("#bri").value = String(lc.lights_brightness);
+  $("#briV").textContent = $("#bri").value;
+  const devs = lc.lights_devices || [];
+  document.querySelectorAll("#litDevs input").forEach(x => x.checked = devs.includes(x.value));
+  const n = String(lc.lights_argb_leds);
+  if (![...$("#argb").options].some(o => o.value === n)) $("#argb").add(new Option(n, n));
+  $("#argb").value = n;
+  const kinds = {motherboard: "主板", dram: "内存", gpu: "显卡"}, cnt = {};
+  for (const d of L.devices || []) cnt[d.kind] = (cnt[d.kind] || 0) + 1;
+  const got = Object.entries(cnt).map(([k, c]) => (kinds[k] || k) + (c > 1 ? ` ×${c}` : "")).join("、");
+  const note = {
+    syncing: `正在同步：${got || "还没认到设备"}。`,
+    idle: "同步程序在跑，但同步关着，灯是各设备自己存的样子。",
+    no_openrgb: `同步程序连不上 OpenRGB 服务端（${L.error || "原因不明"}），会自己隔一会儿重试。`,
+    stopped: "同步程序没在跑。这里改的设置会存下来，等它跑起来才生效。",
+  }[st];
+  $("#litNote").textContent = note + (L.autostart ? "" : " 还没装开机自启，重启电脑后要手动再开。");
 }
 let liveTimer = null;
 function liveShot() {
@@ -220,6 +264,14 @@ $("#slotCpu").addEventListener("change", () => saveSlots("#slotCpu"));
 $("#pw").addEventListener("change", async () => { await api("/api/conf", {panel_width: +$("#pw").value}); load(); });
 $("#hide").addEventListener("change", async () => { await api("/api/conf", {full_hide_seconds: +$("#hide").value}); load(); });
 $("#show").addEventListener("change", async () => { await api("/api/conf", {full_show_seconds: +$("#show").value}); load(); });
+const lit = async b => { await api("/api/conf", b); load(); };
+$("#litSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) lit({lights_enabled: b.dataset.v === "1"}); });
+$("#effSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) lit({lights_effect: b.dataset.v}); });
+$("#exitSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) lit({lights_on_exit: b.dataset.v}); });
+$("#bri").addEventListener("input", () => { $("#briV").textContent = $("#bri").value; });
+$("#bri").addEventListener("change", () => lit({lights_brightness: +$("#bri").value}));
+$("#litDevs").addEventListener("change", () => lit({lights_devices: [...document.querySelectorAll("#litDevs input:checked")].map(x => x.value)}));
+$("#argb").addEventListener("change", () => lit({lights_argb_leds: +$("#argb").value}));
 $("#stale").addEventListener("change", preview);
 $("#refresh").addEventListener("click", preview);
 $("#gen").addEventListener("click", async () => {
