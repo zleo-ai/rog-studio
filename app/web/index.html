@@ -219,9 +219,13 @@ function lights(L) {
   $("#litNote").textContent = note + (L.autostart || !L.autostart_here ? "" : " 还没装开机自启，重启电脑后要手动再开。");
 }
 let liveTimer = null;
+function previewSeen() {
+  const r = document.querySelector(".preview").getBoundingClientRect();
+  return r.bottom > 0 && r.top < innerHeight;
+}
 document.addEventListener("visibilitychange", () => { if (!document.hidden && view === "live") liveShot(); });
 function liveShot() {
-  if (document.hidden) return;  // 窗口最小化或切走时不截：每次截图都要跑一次 adb
+  if (document.hidden || !previewSeen()) return;  // 窗口切走、或预览滚出屏幕时不截：每次截图都要跑一次 adb
   const img = new Image();
   img.onload = () => { $("#big").src = img.src; $("#big").style.opacity = 1; };
   img.onerror = () => { $("#big").style.opacity = .4; };
@@ -233,7 +237,7 @@ async function preview() {
   $("#strip").hidden = live;
   $("#stale").closest("label").hidden = live;
   clearInterval(liveTimer);
-  if (live) { liveShot(); liveTimer = setInterval(liveShot, 5000); return; }
+  if (live) { liveShot(); liveTimer = setInterval(liveShot, 5000); return; }  // 滚回预览时最多等 5 秒补上
   const t = S.conf.theme, d = $("#stale").checked ? "stale" : "fresh";
   $("#big").style.opacity = .4;
   const [a, b] = await Promise.all([api(`/api/render?theme=${t}&view=${view}&data=${d}`), api(`/api/render?theme=${t}&view=strip&data=${d}`)]);
