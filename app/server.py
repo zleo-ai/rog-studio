@@ -59,7 +59,16 @@ def save_conf(c):
     CONF_DIR.mkdir(parents=True, exist_ok=True)
     tmp = CONF.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(c, ensure_ascii=False, indent=2))
-    os.replace(tmp, CONF)  # 整份换上去：推送程序和神光同步随时在读，不能让它们读到半截
+    # 整份换上去：推送程序和神光同步随时在读，不能让它们读到半截。
+    # Windows 上别的进程正好开着这个文件时替换会报 PermissionError，窗口很短，稍等重试几次
+    for i in range(10):
+        try:
+            os.replace(tmp, CONF)
+            return
+        except PermissionError:
+            if i == 9:
+                raise
+            time.sleep(0.05)
 
 
 def themes():
