@@ -219,7 +219,9 @@ function lights(L) {
   $("#litNote").textContent = note + (L.autostart || !L.autostart_here ? "" : " 还没装开机自启，重启电脑后要手动再开。");
 }
 let liveTimer = null;
+document.addEventListener("visibilitychange", () => { if (!document.hidden && view === "live") liveShot(); });
 function liveShot() {
+  if (document.hidden) return;  // 窗口最小化或切走时不截：每次截图都要跑一次 adb
   const img = new Image();
   img.onload = () => { $("#big").src = img.src; $("#big").style.opacity = 1; };
   img.onerror = () => { $("#big").style.opacity = .4; };
