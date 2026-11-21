@@ -160,22 +160,23 @@ Logs and rendered frames live in `~/.local/share/ryuo-studio/`.
 
 ## Windows
 
-> `desktop/install_windows.ps1` and the Windows half of the unit tests are written. They have not been installed on a real Windows PC. Open an issue if you hit something.
+> On a real Windows 11 PC the environment, the dry-run push (quota read, rendering, frame building) and the task definitions have been checked. Registering the tasks and driving the screen from Windows have not been tried yet. Open an issue if you hit something.
 
 You will want:
 
-- Python 3.11+ from python.org, with Add to PATH.
-- `adb` from the Android SDK Platform-Tools on `PATH`, or `RYUO_ADB` pointing at `adb.exe`.
+- [uv](https://docs.astral.sh/uv/) and PowerShell 7 (`pwsh`). uv installs Python 3.12 and the locked dependencies (`hidapi` included) into `.venv`.
+- `adb` from the Android SDK Platform-Tools. Pass its path with `-AdbPath`, or put it on `PATH`.
 - Chrome, or the system Edge.
 - [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) if you want CPU temperature: enable Remote Web Server in Options (port 8085) and start it with Windows. Without it, temperature is a dash and everything else still runs. GPU temperature and load use `nvidia-smi`, NVIDIA only.
 - `ffmpeg` and a local ComfyUI to generate video. Existing video files do not need either.
 - Noto Serif CJK for the Armillary and Ink Gold themes. It is not in the repo. Without it, those two themes fall back to the screen's own sans serif.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File desktop\install_windows.ps1
+pwsh -NoProfile -File desktop\install_windows.ps1                 # prepare only: uv sync, write task XML, register nothing
+pwsh -NoProfile -File desktop\install_windows.ps1 -Register       # register the tasks and the Start Menu shortcut
 ```
 
-The script installs `hidapi`, creates scheduled tasks `RyuoStudio-pusher` and `RyuoStudio-manager` (start at logon, restart about 10 seconds after a crash, logs under `%USERPROFILE%\.local\share\ryuo-studio\`), and adds a Start Menu shortcut named 龙屏. `-NoAuto` skips the logon start. `-Uninstall` removes the tasks and the shortcut and leaves config and videos in place.
+By default the script only runs `uv sync --frozen` and writes the definitions of `RyuoStudio-pusher` and `RyuoStudio-manager` to `%USERPROFILE%\.local\share\ryuo-studio\tasks\`. With `-Register` it registers them (start at logon via a headless `conhost` running PowerShell 7, which runs `tools\run_service.py` from the uv environment) and adds a Start Menu shortcut named 龙屏. The service restarts about 10 seconds after a crash; after five exits within a minute each it stops and exits with code 3. Other options: `-NoAuto` (no logon start), `-Services pusher` (only one task), `-TaskPath '\Folder\'`, `-AdbPath`, `-FailureHook <script>` (called with `-Source -Reason -LogPath` when a task stops abnormally), `-Uninstall`. Logs are under `%USERPROFILE%\.local\share\ryuo-studio\logs\`. Installing never turns on `device_enabled`, and the manager's live screen capture stays off unless `live_preview` is set to `true` in the config file.
 
 Differences from Linux:
 

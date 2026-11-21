@@ -29,7 +29,9 @@ CONF = CONF_DIR / "config.json"
 OUT = Path.home() / ".local" / "share" / "ryuo-studio"
 DEFAULT_CONF = {"theme": "starship", "layout": "split", "push_minutes": 15, "device_enabled": False,
                 "renderer": "native", "full_show_seconds": 15, "full_hide_seconds": 45,
-                "panel_width": 634, "panel_glass": True, "hud": True, "hud_items": ["cpu", "gpu", "mem"]}
+                "panel_width": 634, "panel_glass": True, "hud": True, "hud_items": ["cpu", "gpu", "mem"],
+                # 「屏上实况」每 5 秒跑一次 adb screencap，默认关；只能在 config.json 里手动打开，页面上不给开关
+                "live_preview": False}
 PORT = 7788
 SLOT_CHOICES = {"", "Date&Time", "CPU Temperature", "GPU Temperature"}
 # 神光同步（tools/aura_sync.py）读同一份 config，这几个键归它；校验规则也用它自己的，两边不会各说各话
@@ -229,6 +231,8 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/screen":  # 真机截图：屏上实际画面，比网页效果图准
             if not conf["device_enabled"]:
                 return self.send(503, {"error": "还没允许连接屏幕"})
+            if conf.get("live_preview") is not True:
+                return self.send(503, {"error": "屏上实况没打开（config.json 里 live_preview）"})
             try:
                 png = subprocess.run([hostsys.adb(), "exec-out", "screencap", "-p"], capture_output=True, timeout=10, check=True,
                                      **hostsys.no_window()).stdout

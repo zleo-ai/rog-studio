@@ -201,9 +201,23 @@ def python_cmd(script, *args):
 
 # ---------------- 后台服务（推送、管理器） ----------------
 # Linux：systemd 用户服务 ryuo-<名字>.service（desktop/ 里）。
-# Windows：计划任务 RyuoStudio-<名字>，登录时启动 tools/run_service.py，它把 pid 写在 OUT/<名字>.pid。
+# Windows：计划任务 RyuoStudio-<名字>，登录时经 desktop/windows/Run-RyuoService.ps1 启动 tools/run_service.py，
+# 它把 pid 写在 OUT/<名字>.pid。任务放在哪个文件夹（默认根目录 \）由安装脚本写进 OUT/windows-tasks.json。
 
 SERVICES = ("pusher", "manager")
+TASKS_FILE_NAME = "windows-tasks.json"
+
+
+def task_name(name):
+    """计划任务的名字：根目录下就是 RyuoStudio-pusher，放在文件夹里是 \\Tools\\RyuoStudio-pusher。"""
+    folder = "\\"
+    try:
+        got = json.loads((OUT / TASKS_FILE_NAME).read_text(encoding="utf-8")).get("task_path")
+        if isinstance(got, str) and got.startswith("\\") and got.endswith("\\") and ".." not in got:
+            folder = got
+    except (OSError, ValueError, AttributeError):
+        pass
+    return f"RyuoStudio-{name}" if folder == "\\" else f"{folder}RyuoStudio-{name}"
 
 
 def service(action, name):
@@ -212,8 +226,14 @@ def service(action, name):
     if not IS_WIN:
         subprocess.run(["systemctl", "--user", action, f"ryuo-{name}.service"], timeout=30)
         return
-    task = f"RyuoStudio-{name}"
+    task = task_name(name)
     if action in ("stop", "restart"):
+        # 先留个记号：外层 Run-RyuoService.ps1 看到它就知道是有人让停的，不当成故障去报警
+        try:
+            OUT.mkdir(parents=True, exist_ok=True)
+            (OUT / f"{name}.stop").write_text(str(int(time.time())), encoding="utf-8")
+        except OSError:
+            pass
         subprocess.run(["schtasks", "/End", "/TN", task], capture_output=True, timeout=30, **no_window())
         pid_kill(read_pid(name))  # /End 只停任务本身，保险起见再按 pid 停一次
     if action in ("start", "restart"):
@@ -232,7 +252,7 @@ def service_autostart(name):
         r = subprocess.run(["systemctl", "--user", "is-enabled", f"ryuo-{name}.service"], capture_output=True, text=True, timeout=10)
         return r.stdout.strip() == "enabled"
     # 装的时候加了 -NoAuto 的任务没有登录触发器，只在点图标时启动
-    r = subprocess.run(["schtasks", "/Query", "/TN", f"RyuoStudio-{name}", "/XML"], capture_output=True, text=True,
+    r = subprocess.run(["schtasks", "/Query", "/TN", task_name(name), "/XML"], capture_output=True, text=True,
                        timeout=10, errors="replace", **no_window())
     return r.returncode == 0 and "<LogonTrigger" in r.stdout
 
