@@ -223,6 +223,11 @@ class Screen:
         return 0 if self.live else len(self.fake.frames)
 
 
+def main_background(theme):
+    """分屏左边没有视频时放的静态图在屏上的文件名。按主题固定，换主题才换文件。"""
+    return Path(f"lp-main-{theme}.jpg")
+
+
 def push_round(scr, c, turn, pushed_videos, last, native=False):
     """native=True 且整屏时只放视频（面板由屏上程序叠上去），不用出图。
     原生分屏开了玻璃：屏幕按整屏放视频，窄条由屏上程序半透明叠在右边，宽度随意。"""
@@ -241,14 +246,23 @@ def push_round(scr, c, turn, pushed_videos, last, native=False):
     if video and video.name not in pushed_videos:
         scr.adb("push", str(video), SCREEN_DIR + video.name)
         pushed_videos.add(video.name)
+    # 分屏没有视频时，左边主区放主题自带的静态背景（1606×1080，和主区一样大）。
+    # 不能拿右边窄条那张 634 宽的图顶上：屏幕按区域大小硬拉伸，左边会变形
+    main_bg = None
+    if layout == "split" and not video:
+        main_bg = main_background(theme)
+        if main_bg.name not in pushed_videos:
+            scr.adb("push", str(ROOT / "themes" / theme / "assets" / "main.jpg"), SCREEN_DIR + main_bg.name)
+            pushed_videos.add(main_bg.name)
 
     dev = scr.dev
     dev.set_layout(layout)
     if layout == "split":
-        dev.set_media([video.name] if video else [name], zone=0)
+        dev.set_media([video.name if video else main_bg.name], zone=0)
         dev.set_media([name], zone=1)
-        # 1.0.7 实测：分屏时第三个读数会画到右边窄条上，所以只留两个
-        dev.set_slots(["Date&Time", "CPU Temperature"])
+        # 屏幕自带的时间、温度叠在左边主区上；config.json 的 split_slots 可以改，[] 是全关。
+        # 1.0.7 实测：分屏时第三个读数会画到右边窄条上，所以默认只留两个
+        dev.set_slots(c.get("split_slots", ["Date&Time", "CPU Temperature"]))
     elif video_only:
         dev.set_media([video.name] if video else [], play_mode="Single")
         # 屏幕自带的时间、温度：6 个固定位置，数组下标就是位置，空串是空位。

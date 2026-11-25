@@ -81,7 +81,7 @@ def test_agy_takes_codex_slot_and_says_missing(tmp_path):
     rows = data["rows"]
     assert [r["key"] for r in rows] == ["claude", "agy", "grok", "cursor"]
     agy = rows[1]
-    assert agy["missing"] is True and agy["name"] == "agy"
+    assert agy["missing"] is True and agy["name"] == "Gemini"
     assert "used" not in agy and "resetMs" not in agy  # 不编数
     assert rows[0]["used"] == 40 and rows[2]["used"] == 60
     assert rows[3]["missing"] is True  # Cursor 这份快照里也没有

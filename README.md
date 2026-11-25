@@ -105,7 +105,7 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 **原生实时（默认，分屏用）。** 屏的 adb 出厂就是 root。`tools/native_panel.py` 把 `overlay/` 编出来的程序连同字体、图标、背景放进屏上的 `/data/local/tmp/ryuo/`，用 `app_process` 拉起来，在窄条上按 `render/panel.html` 的样子画。电脑经 `adb forward` 每分钟送一次数据、每 5 秒保活；倒计时和「数据过期」在屏上按秒自己走。20 秒收不到消息，图层自己藏起来。不装应用，不动系统分区。编译：`bash overlay/build.sh`，需要 JDK 17、Android 33 的 `android.jar` 和 d8（默认在 `~/.local/share/ryuo-toolchain/`）。Windows 上用 `python overlay/build.py`。
 
-**图片（整屏布局，也是原生版的兜底）。** 主机按设定的分钟数读一次额度，用当前主题画一张图，`adb push` 到 `/sdcard/pcMedia/`，再经 HID 发一次 `config` 让屏重新加载。每轮换一个新文件名，因为同名覆盖不会刷新。
+**图片（整屏布局，也是原生版的兜底）。** 主机按设定的分钟数读一次额度，用当前主题画一张图，`adb push` 到 `/sdcard/pcMedia/`，再经 HID 发一次 `config` 让屏重新加载。每轮换一个新文件名，因为同名覆盖不会刷新。分屏时左边主区（1606×1080）有视频放视频，没有就放主题自带的静态背景 `themes/<主题>/assets/main.jpg`，不拿右边窄条的图去拉伸。屏幕自带的时间、温度读数叠在左边，`split_slots` 可以改，写 `[]` 全关。
 
 两条路都要主机每秒发一次心跳（CPU、显卡温度）。大约 10 秒没有心跳，屏回到待机。推送程序在后台一直发。
 
@@ -113,11 +113,11 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 `tools/snapshot.py` 先问 magpie 的 `magpie accounts --json`（装了的话），缺的窗口再从一份快照 JSON 里补。路径用 `RYUO_QUOTA_SNAPSHOT` 指定，默认是 `~/.local/state/aios/quota-snapshot.json`。格式是 `{"generated_at_ms", "providers":[{"windows":[{"id","used_pct","resets_at_ms", ...}]}]}`，窗口 id 写在 `snapshot.py` 开头。
 
-面板上四格默认是 Claude、Codex、Grok、Cursor。想换掉某一家，在 `config.json` 里写 `"quota_slots": ["claude", "agy", "grok", "cursor"]`（顺序就是格子的顺序，最多四家，认得的有 `claude` `codex` `grok` `cursor` `agy`）；删掉这个键回到默认。agy 目前接不到数：magpie 的 `agy-cli` 还没给出过额度窗口，这一格会写「暂无数据」。
+面板上四格默认是 Claude、Codex、Grok、Cursor。想换掉某一家，在 `config.json` 里写 `"quota_slots": ["claude", "agy", "grok", "cursor"]`（顺序就是格子的顺序，最多四家，认得的有 `claude` `codex` `grok` `cursor` `agy`）；删掉这个键回到默认。`agy` 那格面板上写 Gemini，用 Gemini 的图标；目前接不到数：magpie 的 `agy-cli` 还没给出过额度窗口，这一格会写「暂无数据」。
 
 哪一家这次没读到额度，它的格子照样占着，数字写破折号、说明写「暂无数据」，不编数，也不会悄悄少一家。没有 magpie、也没有这份快照时，面板不会编数。`snapshot.py` 目前会因为一个窗口都没有而退出，管理器里的效果图就出不来。管理器页面、主题切换和驱动演练不受影响。
 
-四家图标是各公司的商标，不进仓库。本机执行 `bash tools/fetch_logos.sh` 下载；缺了图标时面板只显示名字。
+各家图标是各公司的商标，不进仓库。本机执行 `bash tools/fetch_logos.sh` 下载；缺了图标时面板只显示名字。
 
 ## 加一个主题
 
@@ -159,6 +159,7 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 | `panel_width` | `634` | 面板宽度。634 正好是弯曲的那段 |
 | `panel_glass` | `true` | 透明玻璃，视频铺满、面板叠上去 |
 | `hud` / `hud_items` | 开，`cpu` `gpu` `mem` | 左边自己画的时钟和占用 |
+| `split_slots` | `Date&Time` `CPU Temperature` | 图片模式分屏时屏幕自带的读数（6 个固定位置，下标即位置），`[]` 全关 |
 
 日志和生成的图在 `~/.local/share/ryuo-studio/`。
 

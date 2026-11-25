@@ -24,7 +24,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "render" / "data.js"
 LOGO_DIR = ROOT / "themes" / "_shared" / "logos"
 # 每家用哪个图标；Claude 保留品牌橙，其余跟随主题文字颜色
-LOGO = {"claude": "claude-color.svg", "codex": "codex.svg", "grok": "grok.svg", "cursor": "cursor-mono.svg"}
+LOGO = {"claude": "claude-color.svg", "codex": "codex.svg", "grok": "grok.svg", "cursor": "cursor-mono.svg",
+        "agy": "gemini-color.svg"}
 STALE_AFTER_MIN = 30
 WEEK_MS = 7 * 24 * 3600 * 1000
 
@@ -34,9 +35,9 @@ PROVIDERS = {
     "codex": ("Codex", "openai-codex:primary", "7 天", None),
     "grok": ("Grok", "xai-oauth:credits:1w", "7 天", ("xai-oauth:product:grokbuild:1w", "Build")),
     "cursor": ("Cursor", "cursor:usd:individual-auto", "本月", ("cursor:usd:individual-api", "其他模型")),
-    # agy 命令行（magpie 里叫 agy-cli）。magpie 的 agy-cli 还没给出过额度窗口，窗口名和时长都不知道，所以 MAGPIE_MAP 里先不接；
+    # agy 命令行（magpie 里叫 agy-cli；面板上显示的名字是 Gemini）。magpie 的 agy-cli 还没给出过额度窗口，窗口名和时长都不知道，所以 MAGPIE_MAP 里先不接；
     # 读不到时这一格照样占着，写「暂无数据」。以后 magpie 读得到了，在 MAGPIE_MAP 加一行 ("agy-cli", "<窗口名>")
-    "agy": ("agy", "agy-cli:primary", "额度", None),
+    "agy": ("Gemini", "agy-cli:primary", "额度", None),
 }
 # 面板上四个位置放谁、按什么顺序。想换掉某一家（比如第二格的 Codex 换成 agy），在 config.json 里写
 #   "quota_slots": ["claude", "agy", "grok", "cursor"]

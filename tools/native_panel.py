@@ -31,7 +31,8 @@ DEX = ROOT / "overlay" / "build" / "panel.dex"
 # 中文衬线体（Noto Serif CJK）太大不进仓库，从系统字体目录拿；Windows 上要先装 Noto Serif CJK，没装就退回屏上自带字体
 SYSTEM_FONTS = [Path("/usr/share/fonts/opentype/noto"), Path.home() / "AppData/Local/Microsoft/Windows/Fonts", Path("C:/Windows/Fonts")]
 # Claude 保留品牌橙，其余图标按主题里的 logo 颜色上色
-LOGOS = {"claude": ("claude-color.svg", False), "codex": ("codex.svg", True), "grok": ("grok.svg", True), "cursor": ("cursor-mono.svg", True)}
+LOGOS = {"claude": ("claude-color.svg", False), "codex": ("codex.svg", True), "grok": ("grok.svg", True), "cursor": ("cursor-mono.svg", True),
+         "agy": ("gemini-color.svg", False)}
 CSS_KEYS = {"ink": "ink", "dim": "dim", "faint": "faint", "line": "line", "accent": "accent", "accent2": "accent2",
             "hot": "hot", "mark": "mark", "warn": "warn", "logoInk": "logo-ink"}
 
