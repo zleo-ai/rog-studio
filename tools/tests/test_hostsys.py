@@ -167,7 +167,8 @@ def test_service_linux_uses_systemd(monkeypatch):
     assert rec.calls[-1] == ["systemctl", "--user", "is-active", "ryuo-manager.service"]
 
 
-def test_service_windows_uses_schtasks(monkeypatch):
+def test_service_windows_uses_schtasks(monkeypatch, tmp_path):
+    monkeypatch.setattr(hostsys, "OUT", tmp_path)  # 不读本机装过的 windows-tasks.json（装在 \AIOS\ 之类的文件夹时任务名会带前缀）
     monkeypatch.setattr(hostsys, "IS_WIN", True)
     rec = Recorder()
     monkeypatch.setattr(hostsys.subprocess, "run", rec)
