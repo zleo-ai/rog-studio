@@ -192,9 +192,30 @@ def test_installer_default_only_writes_definitions(tmp_path):
     for name in ("pusher", "manager"):
         xml = (tasks / f"RyuoStudio-{name}.xml").read_bytes().decode("utf-16")
         assert "<URI>\\RyuoStudioTest\\RyuoStudio-" + name + "</URI>" in xml
-        assert "conhost.exe" in xml and "--headless" in xml and "pwsh.exe" in xml
+        assert "conhost.exe" in xml and "--headless" in xml and "pwsh.exe" in xml.lower()  # PATH 上找到的可能写成 pwsh.EXE
         assert f"-Name {name}" in xml and "-FailureHook" in xml and "-AdbPath" in xml
         assert "<LogonTrigger>" in xml and "<RunLevel>LeastPrivilege</RunLevel>" in xml
     assert not (tmp_path / ".local" / "share" / "ryuo-studio" / "windows-tasks.json").exists()
     q = subprocess.run(["schtasks", "/Query", "/TN", "\\RyuoStudioTest\\RyuoStudio-pusher"], capture_output=True)
     assert q.returncode != 0  # 没注册
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not PWSH, reason="要 Windows 和 PowerShell 7")
+def test_installer_pins_given_pwsh(tmp_path):
+    """-PwshPath 给了就钉它；给的不是 pwsh.exe 就不写任务定义。"""
+    env = {**os.environ, "USERPROFILE": str(tmp_path)}
+    fixed = tmp_path / "PowerShell" / "7" / "pwsh.exe"
+    fixed.parent.mkdir(parents=True)
+    fixed.write_bytes(b"")
+    cmd = [PWSH, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(ROOT / "desktop" / "install_windows.ps1"),
+           "-SkipSync", "-TaskPath", "\\RyuoStudioTest\\", "-Services", "pusher"]
+    r = subprocess.run(cmd + ["-PwshPath", str(fixed)], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env=env, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    xml = (tmp_path / ".local" / "share" / "ryuo-studio" / "tasks" / "RyuoStudio-pusher.xml").read_bytes().decode("utf-16")
+    assert f"--headless &quot;{fixed}&quot;" in xml
+    bad = tmp_path / "python.exe"
+    bad.write_bytes(b"")
+    r = subprocess.run(cmd + ["-PwshPath", str(bad)], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env=env, timeout=120)
+    assert r.returncode != 0

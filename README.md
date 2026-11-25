@@ -113,7 +113,9 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 `tools/snapshot.py` 先问 magpie 的 `magpie accounts --json`（装了的话），缺的窗口再从一份快照 JSON 里补。路径用 `RYUO_QUOTA_SNAPSHOT` 指定，默认是 `~/.local/state/aios/quota-snapshot.json`。格式是 `{"generated_at_ms", "providers":[{"windows":[{"id","used_pct","resets_at_ms", ...}]}]}`，窗口 id 写在 `snapshot.py` 开头。
 
-没有 magpie、也没有这份快照时，面板不会编数。`snapshot.py` 目前会因为一个窗口都没有而退出，管理器里的效果图就出不来。管理器页面、主题切换和驱动演练不受影响。
+面板上四格默认是 Claude、Codex、Grok、Cursor。想换掉某一家，在 `config.json` 里写 `"quota_slots": ["claude", "agy", "grok", "cursor"]`（顺序就是格子的顺序，最多四家，认得的有 `claude` `codex` `grok` `cursor` `agy`）；删掉这个键回到默认。agy 目前接不到数：magpie 的 `agy-cli` 还没给出过额度窗口，这一格会写「暂无数据」。
+
+哪一家这次没读到额度，它的格子照样占着，数字写破折号、说明写「暂无数据」，不编数，也不会悄悄少一家。没有 magpie、也没有这份快照时，面板不会编数。`snapshot.py` 目前会因为一个窗口都没有而退出，管理器里的效果图就出不来。管理器页面、主题切换和驱动演练不受影响。
 
 四家图标是各公司的商标，不进仓库。本机执行 `bash tools/fetch_logos.sh` 下载；缺了图标时面板只显示名字。
 
@@ -212,7 +214,7 @@ pwsh -NoProfile -File desktop\install_windows.ps1 -Register    # 注册计划任
 - 鼠标 ROG HARPE II ACE。OpenRGB 1.1 还不认。
 - 龙王风扇每一把的真实灯数。查不到公开数据；接口上多设几颗灯只影响流光长短。
 - 在 Windows 上注册任务、真正连屏跑一段时间。
-- 屏上原生面板还不会写出「缺」了哪家，只有图片版会写。
+- 屏上原生面板还不会给读不到的那家留格子写「暂无数据」，只有图片版会写；原生版直接少画那一家。
 
 ## 参与
 

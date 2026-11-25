@@ -113,7 +113,9 @@ Both paths need a heartbeat every second (CPU and GPU temperature). After about 
 
 `tools/snapshot.py` asks magpie (`magpie accounts --json`) when it is installed, then fills any missing windows from a snapshot JSON. Point `RYUO_QUOTA_SNAPSHOT` at the file. The default path is `~/.local/state/aios/quota-snapshot.json`. The shape is `{"generated_at_ms", "providers":[{"windows":[{"id","used_pct","resets_at_ms", ...}]}]}`. Window ids are listed at the top of `snapshot.py`.
 
-With neither source, the panel does not invent numbers. `snapshot.py` currently exits because it has no window to rank, and the manager's preview render fails. The manager page, theme switching, and the driver dry-run still work.
+The four slots default to Claude, Codex, Grok, and Cursor. To swap one out, set `"quota_slots": ["claude", "agy", "grok", "cursor"]` in `config.json` (slot order, up to four; known keys are `claude` `codex` `grok` `cursor` `agy`). Remove the key to go back to the default. agy has no numbers yet: magpie's `agy-cli` has not reported a quota window, so that slot says 暂无数据 ("no data").
+
+When a provider could not be read this time, its slot stays in place with a dash and 暂无数据. Nothing is made up and no provider silently disappears. With neither source, the panel does not invent numbers. `snapshot.py` currently exits because it has no window to rank, and the manager's preview render fails. The manager page, theme switching, and the driver dry-run still work.
 
 The four product icons are trademarks and are not in the git tree. `bash tools/fetch_logos.sh` downloads them locally. Without the files, the panel prints the names only.
 
