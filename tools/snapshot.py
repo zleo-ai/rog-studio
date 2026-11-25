@@ -56,7 +56,7 @@ def slots(conf_path=CONF):
           and len(set(want)) == len(want))
     return list(want) if ok else list(DEFAULT_SLOTS)
 
-# 四家都优先直接问 magpie（它自己就在读各家订阅的额度）；问不到的窗口（比如 Grok Build）再用本机快照（omp 那条）。
+# 四家都优先直接问 magpie（它自己就在读各家订阅的额度）；问不到的窗口（比如 Grok Build）再用本机快照（RYUO_QUOTA_SNAPSHOT 那份）。
 # magpie 一次要问好几家，十几秒，所以结果缓存几分钟，推送程序每分钟要数据时不用每次都问。
 MAGPIE_CACHE = Path.home() / ".local/share/ryuo-studio/magpie-accounts.json"
 MAGPIE_TTL_S = 240

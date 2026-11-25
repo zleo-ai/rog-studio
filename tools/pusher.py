@@ -203,7 +203,7 @@ class Screen:
 
     def __init__(self, live):
         self.live = live
-        if live:  # 只有 Maple 允许连接屏幕、装好 udev 规则以后才会走到这里
+        if live:  # 只有 config.json 里打开 device_enabled、Linux 上装好 udev 规则以后才会走到这里
             from ryuo.transport import open_default
             with step("打开 HID 设备"):
                 self.dev = RyuoDevice(TimedTransport(open_default()))
