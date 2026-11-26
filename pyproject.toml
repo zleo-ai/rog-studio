@@ -1,0 +1,19 @@
+# 整个仓库的运行环境（推送、管理器、出图、神光同步）。用 uv 管：
+#   uv sync            建 .venv 并按 uv.lock 装好依赖（含驱动包 ryuo 和 Windows 上连屏要用的 hidapi）
+#   uv run --frozen python -X utf8 -I tools/pusher.py --once
+# 只想单独用驱动的话，driver/ 自己也是一个包，见 driver/README.md。
+[project]
+name = "ryuo-studio"
+version = "0.1.0"
+description = "Host toolkit for the ROG RYUO IV AIO cooler screen"
+requires-python = ">=3.11"
+dependencies = ["ryuo[hid]"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+ryuo = { path = "driver", editable = true }

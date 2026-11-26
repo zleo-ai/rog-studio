@@ -26,6 +26,7 @@ import argparse
 import colorsys
 import json
 import math
+import os
 import re
 import signal
 import struct
@@ -281,7 +282,9 @@ class Lights:
 def write_status(path, **kw):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"at": int(time.time()), **kw}, ensure_ascii=False))
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"at": int(time.time()), **kw}, ensure_ascii=False))
+        os.replace(tmp, path)  # 管理器随时在读，整份换上去
     except OSError:
         pass
 

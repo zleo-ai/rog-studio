@@ -123,7 +123,7 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 ## 神光同步
 
-`tools/aura_sync.py` 经本机 OpenRGB（`127.0.0.1:6742`）给主板、内存、显卡推颜色，主板 30 帧，内存和显卡走 SMBus、15 帧。主色取主题标题色，副色取 `theme.css` 的 `--accent2`。管理器里换主题，灯在 1.5 秒内渐变过去。
+`tools/aura_sync.py` 经本机 OpenRGB（`127.0.0.1:6742`）给主板（含三路 ARGB，机箱风扇和灯板接在这上面；龙王冷头屏的灯归屏幕自己）、内存、显卡推颜色，主板 30 帧，内存和显卡走 SMBus、15 帧。主色取主题标题色，副色取 `theme.css` 的 `--accent2`。管理器里换主题，灯在 1.5 秒内渐变过去。
 
 需要 OpenRGB 1.0 以上。`desktop/install.sh` 在找得到 `openrgb` 时会装两个用户服务：`ryuo-openrgb`（只听 127.0.0.1）和 `ryuo-lights`。
 
@@ -139,6 +139,8 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 | `lights_on_exit` | `off` 关灯 / `keep` 停在最后一帧 |
 
 写坏的值会被忽略，沿用上一次。同步只用实时推色和临时硬件模式，从不发 OpenRGB 的 SAVEMODE。带「自动存盘」标记的设备一律跳过，写进 `lights_devices` 也不碰：本机的 Keychron 键盘就是这样，一切模式就会写进键盘自己的存储。电脑睡眠醒来会重新接管一次。
+
+管理器的「灯效」一节可以开关同步、换效果、调亮度、选同步哪些设备、改每路灯口灯数，以及关同步时灭灯还是保持原样；状态按同步程序自己写的状态文件判断，它没在跑就显示没在跑。主板灯口一个都不亮、连主板自带的彩虹效果也不亮时，先进 BIOS 看灯光开关是不是关了，不是驱动问题。
 
 ## 配置
 
@@ -160,22 +162,23 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 ## Windows
 
-> 代码和 `desktop/install_windows.ps1` 写好了，单元测试覆盖了 Windows 那一半，但还没在真 Windows 上装过。碰到问题请开 issue。
+> 在一台真的 Windows 11 上验过：建环境、演练推送（读额度、出图、组帧）、生成任务定义。还没在 Windows 上注册任务、真正连屏。碰到问题请开 issue。
 
 要准备的东西：
 
-- Python 3.11 以上（python.org 的安装包，勾上 Add to PATH）。
-- Android SDK Platform-Tools 里的 `adb`，放进 PATH，或用 `RYUO_ADB` 指到 `adb.exe`。
+- [uv](https://docs.astral.sh/uv/) 和 PowerShell 7（`pwsh`）。Python 3.12 和锁定的依赖（含 `hidapi`）由 uv 装进仓库的 `.venv`。
+- Android SDK Platform-Tools 里的 `adb`，用 `-AdbPath` 指过去，或放进 PATH。
 - Chrome；没有就用系统自带的 Edge。
 - 想显示 CPU 温度：装 [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)，在 Options 里打开 Remote Web Server（端口 8085），并让它开机启动。不装的话温度是破折号，别的照常。显卡温度和占用走 `nvidia-smi`，只支持 NVIDIA。
 - 生成视频要用 `ffmpeg` 和本机 ComfyUI。只放现成视频就不需要。
 - 浑天铜仪、墨夜流金用的中文衬线体（Noto Serif CJK）不在仓库里。没装的话，这两套主题的字会换成屏上自带的无衬线体。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File desktop\install_windows.ps1
+pwsh -NoProfile -File desktop\install_windows.ps1              # 只准备：uv sync、写出任务定义，什么都不注册
+pwsh -NoProfile -File desktop\install_windows.ps1 -Register    # 注册计划任务和开始菜单「龙屏」
 ```
 
-脚本会装 `hidapi`，建两个计划任务 `RyuoStudio-pusher` 和 `RyuoStudio-manager`（登录时启动，挂了大约 10 秒后自己重启，日志在 `%USERPROFILE%\.local\share\ryuo-studio\`），再在开始菜单放一个「龙屏」。`-NoAuto` 不设开机自启；`-Uninstall` 删掉任务和快捷方式，配置和视频留着。
+默认只跑 `uv sync --frozen`，把 `RyuoStudio-pusher`、`RyuoStudio-manager` 两个计划任务的定义写到 `%USERPROFILE%\.local\share\ryuo-studio\tasks\`。加 `-Register` 才注册：登录时用无窗口的 `conhost` 拉起 PowerShell 7，再用 uv 的环境跑 `tools\run_service.py`；挂了大约 10 秒后自己重启，连续 5 次都是一分钟内就退出就停下、以退出码 3 结束。其他参数：`-NoAuto` 不设登录启动，`-Services pusher` 只装一个，`-TaskPath '\文件夹\'`，`-AdbPath`，`-FailureHook <脚本>`（任务非正常结束时以 `-Source -Reason -LogPath` 调用它），`-Uninstall`。日志在 `%USERPROFILE%\.local\share\ryuo-studio\logs\`。安装不会打开 `device_enabled`；管理器的「屏上实况」（每 5 秒一次 adb 截屏）也默认关，要在配置文件里写 `"live_preview": true` 才有。
 
 和 Linux 不一样的地方：
 
@@ -205,11 +208,11 @@ powershell -ExecutionPolicy Bypass -File desktop\install_windows.ps1
 
 ## 还没做的
 
-- 管理器页面里的神光同步开关。现在只能改配置文件。
 - 键盘。OpenRGB 里标了自动存盘的设备会跳过。
 - 鼠标 ROG HARPE II ACE。OpenRGB 1.1 还不认。
 - 龙王风扇每一把的真实灯数。查不到公开数据；接口上多设几颗灯只影响流光长短。
-- 在一台真实的 Windows 上把安装脚本走一遍。
+- 在 Windows 上注册任务、真正连屏跑一段时间。
+- 屏上原生面板还不会写出「缺」了哪家，只有图片版会写。
 
 ## 参与
 

@@ -7,6 +7,7 @@
 """
 import json
 import mimetypes
+import os
 import subprocess
 import sys
 import threading
@@ -17,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+import aura_sync  # noqa: E402
 import hostsys  # noqa: E402
 import render as render_page  # noqa: E402
 
@@ -27,12 +29,19 @@ CONF = CONF_DIR / "config.json"
 OUT = Path.home() / ".local" / "share" / "ryuo-studio"
 DEFAULT_CONF = {"theme": "starship", "layout": "split", "push_minutes": 15, "device_enabled": False,
                 "renderer": "native", "full_show_seconds": 15, "full_hide_seconds": 45,
-                "panel_width": 634, "panel_glass": True, "hud": True, "hud_items": ["cpu", "gpu", "mem"]}
+                "panel_width": 634, "panel_glass": True, "hud": True, "hud_items": ["cpu", "gpu", "mem"],
+                # 「屏上实况」每 5 秒跑一次 adb screencap，默认关；只能在 config.json 里手动打开，页面上不给开关
+                "live_preview": False}
 PORT = 7788
 SLOT_CHOICES = {"", "Date&Time", "CPU Temperature", "GPU Temperature"}
+# 神光同步（tools/aura_sync.py）读同一份 config，这几个键归它；校验规则也用它自己的，两边不会各说各话
+LIGHT_KEYS = ("lights_enabled", "lights_effect", "lights_brightness", "lights_devices", "lights_argb_leds", "lights_on_exit")
+LIGHT_KINDS = ("motherboard", "dram", "gpu")  # 键盘的模式会写进它自己的存储，鼠标 OpenRGB 还不支持，都不给选
+LIGHTS_STATUS = OUT / "lights.json"
 
 JOBS = {}
 LOG = []
+CONF_LOCK = threading.Lock()  # 两个请求同时改设置时，后一个不能拿着旧的那份把前一个盖掉
 RENDER_LOCK = threading.Lock()  # 无头 Chrome 共用一个配置目录，同时开两个会互相打架
 
 
@@ -50,7 +59,18 @@ def load_conf():
 
 def save_conf(c):
     CONF_DIR.mkdir(parents=True, exist_ok=True)
-    CONF.write_text(json.dumps(c, ensure_ascii=False, indent=2))
+    tmp = CONF.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(c, ensure_ascii=False, indent=2))
+    # 整份换上去：推送程序和神光同步随时在读，不能让它们读到半截。
+    # Windows 上别的进程正好开着这个文件时替换会报 PermissionError，窗口很短，稍等重试几次
+    for i in range(10):
+        try:
+            os.replace(tmp, CONF)
+            return
+        except PermissionError:
+            if i == 9:
+                raise
+            time.sleep(0.05)
 
 
 def themes():
@@ -110,10 +130,59 @@ def pusher_status():
     last = ""
     logf = OUT / "pusher.log"
     if logf.exists():
-        lines = [x for x in logf.read_text(errors="replace").splitlines()[-40:]
-                 if x[:2].isdigit() and "warning" not in x.lower()]
+        lines = [x for x in logf.read_text(errors="replace").splitlines()[-300:]
+                 if x[:2].isdigit() and "warning" not in x.lower()
+                 and not any(k in x for k in ("心跳写入", "开始：", "完成：", "还活着"))]
         last = lines[-1] if lines else ""
     return {"running": active, "autostart": hostsys.service_autostart("pusher"), "last": last}
+
+
+def lights_conf(conf):
+    c = aura_sync.clean(conf, aura_sync.DEFAULTS)  # 同步程序实际会用的值
+    return {k: c[k] for k in LIGHT_KEYS}
+
+
+def lights_status(conf):
+    """按同步程序自己写的状态文件判断，不看服务名：它可能是临时拉起来的，也可能根本没跑。"""
+    try:
+        st = json.loads(LIGHTS_STATUS.read_text())
+        age = time.time() - float(st["at"])
+    except (OSError, ValueError, TypeError, KeyError, OverflowError):
+        st, age = {}, None
+    lc = lights_conf(conf)
+    fresh = lambda limit: age is not None and 0 <= age < limit  # 时间戳在未来（时钟往回校过）也算不可信
+    devices = st.get("devices") if isinstance(st.get("devices"), list) else []
+    # 跑着时每 5 秒写一次；连不上 OpenRGB 时每次重试写一次，重试间隔最长 30 秒
+    if fresh(15) and st.get("running"):
+        if bool(st.get("enabled")) != lc["lights_enabled"]:
+            state = "switching"  # 刚点了开关，同步程序还没写下一次状态
+        elif not lc["lights_enabled"]:
+            state = "idle"
+        else:
+            state = "syncing" if devices else "no_devices"
+    elif fresh(45) and st.get("error"):
+        state = "no_openrgb"
+    else:
+        state = "stopped"
+    return {"state": state, "devices": devices if state in ("syncing", "idle", "switching") else [],
+            "error": str(st.get("error", "")) if state == "no_openrgb" else "",
+            "autostart": hostsys.service_autostart("lights"), "autostart_here": not hostsys.IS_WIN, "conf": lc}
+
+
+def set_lights(conf, b):
+    """只改请求里带了的灯效键；写坏的值沿用原来的。返回值真变了的键。"""
+    inc = {k: b[k] for k in LIGHT_KEYS if k in b}
+    v = inc.get("lights_devices")
+    if v is not None and not (isinstance(v, list) and all(x in LIGHT_KINDS for x in v)):
+        del inc["lights_devices"]
+    if not inc:
+        return []
+    prev = aura_sync.clean(conf, aura_sync.DEFAULTS)
+    eff = aura_sync.clean({**conf, **inc}, prev)
+    changed = [k for k in inc if eff[k] != prev[k]]
+    for k in inc:
+        conf[k] = eff[k]
+    return changed
 
 
 class H(BaseHTTPRequestHandler):
@@ -158,10 +227,12 @@ class H(BaseHTTPRequestHandler):
         conf = load_conf()
         if p == "/api/state":
             return self.send(200, {"conf": conf, "themes": themes(), "device": device_status(conf),
-                                   "pusher": pusher_status(), "jobs": list(JOBS.values())[-20:], "log": LOG[-50:]})
+                                   "pusher": pusher_status(), "lights": lights_status(conf), "jobs": list(JOBS.values())[-20:], "log": LOG[-50:]})
         if p == "/api/screen":  # 真机截图：屏上实际画面，比网页效果图准
             if not conf["device_enabled"]:
                 return self.send(503, {"error": "还没允许连接屏幕"})
+            if conf.get("live_preview") is not True:
+                return self.send(503, {"error": "屏上实况没打开（config.json 里 live_preview）"})
             try:
                 png = subprocess.run([hostsys.adb(), "exec-out", "screencap", "-p"], capture_output=True, timeout=10, check=True,
                                      **hostsys.no_window()).stdout
@@ -176,26 +247,38 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"url": f"/out/renders/{out.name}?t={int(time.time())}"})
         return self.send(404, {"error": "not found"})
 
+    def save_settings(self, b):
+        conf = load_conf()
+        for k in ("theme", "layout", "push_minutes", "renderer", "full_show_seconds", "full_hide_seconds",
+                  "panel_width", "panel_glass", "hud"):
+            if k in b:
+                conf[k] = b[k]
+        v = b.get("hud_items")
+        if isinstance(v, list) and all(x in ("cpu", "gpu", "mem") for x in v):
+            conf["hud_items"] = v
+        for k in ("split_slots", "full_slots"):  # 屏幕自带读数：6 个固定位置，下标即位置
+            v = b.get(k)
+            if isinstance(v, list) and len(v) <= 6 and all(x in SLOT_CHOICES for x in v):
+                conf[k] = v
+        lit = set_lights(conf, b)
+        save_conf(conf)
+        if lit:
+            lc = lights_conf(conf)
+            log(f"灯效：{'同步开' if lc['lights_enabled'] else '同步关'} · "
+                f"{ {'flow': '流光', 'breathe': '呼吸', 'static': '常亮'}[lc['lights_effect']] } · 亮度 {lc['lights_brightness']}")
+        if b and not set(b) - set(LIGHT_KEYS):
+            return self.send(200, conf)  # 只改灯效时不再记一条推送设置
+        how = "实时" if conf.get("renderer", "native") == "native" else f"每 {conf['push_minutes']} 分钟推一次图"
+        log(f"设置已保存：主题 {conf['theme']} · {'分屏' if conf['layout'] == 'split' else '整屏'} · {how}")
+        return self.send(200, conf)
+
     def do_POST(self):
         p = urlparse(self.path).path
         b = self.body()
         conf = load_conf()
         if p == "/api/conf":
-            for k in ("theme", "layout", "push_minutes", "renderer", "full_show_seconds", "full_hide_seconds",
-                      "panel_width", "panel_glass", "hud"):
-                if k in b:
-                    conf[k] = b[k]
-            v = b.get("hud_items")
-            if isinstance(v, list) and all(x in ("cpu", "gpu", "mem") for x in v):
-                conf["hud_items"] = v
-            for k in ("split_slots", "full_slots"):  # 屏幕自带读数：6 个固定位置，下标即位置
-                v = b.get(k)
-                if isinstance(v, list) and len(v) <= 6 and all(x in SLOT_CHOICES for x in v):
-                    conf[k] = v
-            save_conf(conf)
-            how = "实时" if conf.get("renderer", "native") == "native" else f"每 {conf['push_minutes']} 分钟推一次图"
-            log(f"设置已保存：主题 {conf['theme']} · {'分屏' if conf['layout'] == 'split' else '整屏'} · {how}")
-            return self.send(200, conf)
+            with CONF_LOCK:
+                return self.save_settings(b)
         if p == "/api/video":
             theme = b.get("theme", conf["theme"])
             tdir = ROOT / "themes" / theme

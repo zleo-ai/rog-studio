@@ -21,9 +21,13 @@ config，再删掉上一张。重发 config 时左边视频会从头播，图片
 """
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,8 +47,101 @@ DEFAULTS = {"theme": "starship", "layout": "split", "push_minutes": 15, "device_
 NATIVE_TICK_S, NATIVE_DATA_S = 5, 60
 
 
+_LOG_LOCK = threading.Lock()
+
+
 def say(msg):
-    print(time.strftime("%H:%M:%S"), msg, flush=True)
+    """一行日志：墙钟 + 开机以来的单调时钟。写完立刻 fsync，电脑硬卡死时还没落盘的内容会丢，卡前最后几行最要紧。"""
+    now = time.time()
+    line = f"{time.strftime('%m-%d %H:%M:%S', time.localtime(now))}.{int(now * 1000) % 1000:03d} [{time.monotonic():.3f}] {msg}\n"
+    with _LOG_LOCK:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        try:
+            os.fsync(sys.stdout.fileno())
+        except (OSError, ValueError):  # 终端、管道上 fsync 不了，不要紧
+            pass
+
+
+@contextmanager
+def step(name):
+    """记一步的开始、结束和耗时；失败也记下来再往外抛。"""
+    say(f"开始：{name}")
+    t0 = time.monotonic()
+    try:
+        yield
+    except BaseException as e:
+        say(f"失败：{name}，用时 {(time.monotonic() - t0) * 1000:.0f} ms，{type(e).__name__}: {e}")
+        raise
+    say(f"完成：{name}，用时 {(time.monotonic() - t0) * 1000:.0f} ms")
+
+
+def timed(obj, attr, name):
+    """把对象上的一个方法换成带 step 记录的版本。"""
+    fn = getattr(obj, attr)
+
+    def wrapper(*a, **kw):
+        with step(name):
+            return fn(*a, **kw)
+    setattr(obj, attr, wrapper)
+
+
+def memory():
+    """推送进程自己的常驻内存，加上整个服务（含它拉起的 adb、Chrome、编译器等子进程）当前和历史最高占用。"""
+    parts = []
+    try:
+        st = dict(x.split(":", 1) for x in Path("/proc/self/status").read_text().splitlines() if ":" in x)
+        parts.append(f"本进程 {int(st['VmRSS'].split()[0]) // 1024}M（最高 {int(st['VmHWM'].split()[0]) // 1024}M）")
+        cg = Path("/sys/fs/cgroup") / Path("/proc/self/cgroup").read_text().strip().split("::", 1)[1].lstrip("/")
+        cur, peak = (int((cg / f).read_text()) // 2 ** 20 for f in ("memory.current", "memory.peak"))
+        parts.append(f"整个服务 {cur}M（最高 {peak}M）")
+    except (OSError, ValueError, KeyError, IndexError):
+        pass
+    return "，".join(parts) or "内存读不到"
+
+
+HB_SLOW_MS, HB_SUMMARY_EVERY = 200, 10
+
+
+class TimedTransport:
+    """包在 HID 传输层外面：心跳线程每次写都计时，慢的单独记一行，其余每 10 次汇总一行。"""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.times = []
+
+    def write_report(self, report):
+        t0 = time.monotonic()
+        try:
+            self.inner.write_report(report)
+        finally:
+            ms = (time.monotonic() - t0) * 1000
+            if threading.current_thread().name == "ryuo-heartbeat":
+                if ms > HB_SLOW_MS:
+                    say(f"心跳写入慢：{ms:.0f} ms")
+                self.times.append(ms)
+                if len(self.times) >= HB_SUMMARY_EVERY:
+                    say(f"心跳写入 {len(self.times)} 次：平均 {sum(self.times) / len(self.times):.1f} ms，最长 {max(self.times):.1f} ms")
+                    self.times = []
+            elif ms > HB_SLOW_MS:
+                say(f"HID 写入慢：{ms:.0f} ms")
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+ALIVE_S = 60  # 每隔这么久记一行「还活着」和内存，电脑卡死后翻日志能看到最后正常的时刻
+
+
+def watch_heartbeat(hb, seen):
+    """心跳在后台线程里跑，出错只记在 hb.errors 里；这里把新错误和定期的存活行写进日志。"""
+    err = hb.errors[-1] if hb.errors else None
+    if err is not None and err is not seen.get("err"):
+        say(f"心跳出错：{type(err).__name__}: {err}（已累计心跳 {hb.ticks} 次）")
+        seen["err"] = err
+    if time.time() - seen.get("alive", 0) >= ALIVE_S:
+        say(f"还活着：心跳累计 {hb.ticks} 次，{memory()}")
+        seen["alive"] = time.time()
 
 
 def conf():
@@ -108,7 +205,8 @@ class Screen:
         self.live = live
         if live:  # 只有 Maple 允许连接屏幕、装好 udev 规则以后才会走到这里
             from ryuo.transport import open_default
-            self.dev = RyuoDevice(open_default())
+            with step("打开 HID 设备"):
+                self.dev = RyuoDevice(TimedTransport(open_default()))
         else:
             self.fake = FakeTransport()
             self.dev = RyuoDevice(self.fake)
@@ -118,7 +216,8 @@ class Screen:
         if not self.live:
             say("演练 · 会执行：" + " ".join(cmd))
             return
-        subprocess.run(cmd, check=True, timeout=120, **hostsys.no_window())
+        with step("adb " + " ".join(args)):
+            subprocess.run(cmd, check=True, timeout=120, **hostsys.no_window())
 
     def frames_sent(self):
         return 0 if self.live else len(self.fake.frames)
@@ -182,11 +281,22 @@ def main():
     if scr.live:
         import native_panel
         native = native_panel.NativePanel()
-    say("开始推送" + ("" if scr.live else "（演练模式：不连屏幕）"))
+        for attr, name in (("sync", "把面板文件同步到屏上"), ("stop", "停掉屏上原生面板"), ("start", "拉起屏上原生面板"),
+                           ("connect", "连上原生面板的 socket")):
+            timed(native, attr, name)
+    say(f"开始推送（进程 {os.getpid()}，父进程 {os.getppid()}，systemd 调用号 {os.environ.get('INVOCATION_ID', '无')}）"
+        + ("" if scr.live else "（演练模式：不连屏幕）") + f"，{memory()}")
     pushed, turn, last = set(), 0, {}
     applied, data_at, sent_mode = None, 0.0, None
-    with scr.dev.heartbeat(telemetry):
+    seen = {"alive": time.time()}
+
+    def stopped(signum, _frame):  # systemd 停服务发 SIGTERM；记一行再走，日志里才分得清「被停」和「卡死」
+        say(f"收到停止信号 {signal.Signals(signum).name}，退出；{memory()}")
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, stopped)
+    with scr.dev.heartbeat(telemetry) as hb:
         while True:
+            watch_heartbeat(hb, seen)
             c = conf()
             use_native = native is not None and c["renderer"] == "native"
             key = (c["theme"], c["layout"], use_native, bool(c["panel_glass"]), bool(c["hud"]),
@@ -199,7 +309,9 @@ def main():
                         push_round(scr, c, turn, pushed, last, native=True)
                         turn += 1
                         applied = key
-                        native_panel.build_bundle(c["theme"])
+                        with step("准备主题文件"):
+                            native_panel.build_bundle(c["theme"])
+                        say(f"内存：{memory()}")
                         native.close()  # 下面重连时顺带把新主题的文件同步上去
                         data_at = 0
                     fresh = native.ensure()
