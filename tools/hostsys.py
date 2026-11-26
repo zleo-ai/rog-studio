@@ -160,7 +160,7 @@ def gpu():
     try:
         out = subprocess.run([exe, "--query-gpu=temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"],
                              capture_output=True, text=True, timeout=5, **no_window()).stdout
-        temp, load = (int(x) for x in out.splitlines()[0].split(","))
+        temp, load = (round(float(x)) for x in out.splitlines()[0].split(","))
         return {"temp": temp, "load": load}
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None

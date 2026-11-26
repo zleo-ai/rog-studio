@@ -45,15 +45,126 @@ def test_broken_config_falls_back(tmp_path):
 def test_every_default_and_agy_is_known():
     assert set(snapshot.DEFAULT_SLOTS) <= set(snapshot.PROVIDERS)
     assert "agy" in snapshot.PROVIDERS
-    # agy-cli 的窗口还没接：magpie 里出现 agy-cli 也不能被当成某个窗口的数
-    assert not [k for k in snapshot.MAGPIE_MAP if k[0].startswith("agy")]
+    assert snapshot.PROVIDERS["agy"] == ("Gemini", "agy-cli:primary", "7 天", ("agy-cli:5h", "5 小时"))
 
 
-def test_agy_without_windows_ignored_from_magpie(monkeypatch):
-    accounts = [{"agent": "agy-cli", "active": True, "readAt": "2026-11-25T22:20:23+08:00",
-                 "windows": [{"name": "7 days", "used": 55, "resetsAt": "2026-12-01T00:00:00+08:00"}]}]
+def test_magpie_plugin_agy_cli_windows(monkeypatch):
+    accounts = [
+        {"agent": "agy-cli", "active": True, "readAt": "2026-11-25T22:20:23+08:00",
+         "windows": [{"name": "7 days", "used": 55, "resetsAt": "2026-12-01T00:00:00+08:00"}]},
+        {"agent": "plugin:agy-cli", "active": True, "readAt": "2026-11-26T22:45:22+08:00",
+         "windows": [
+             {"name": "Gemini · 7 days", "used": 13.4, "resetsAt": "2026-12-03T07:07:30Z"},
+             {"name": "Gemini · 5 hours", "used": 15.8, "resetsAt": "2026-11-26T17:07:30Z"},
+         ]},
+    ]
     monkeypatch.setattr(snapshot, "magpie_accounts", lambda: accounts)
-    assert snapshot.magpie_windows() == {}
+    wins = snapshot.magpie_windows()
+    assert wins["agy-cli:primary"]["used_pct"] == 13.4
+    assert wins["agy-cli:primary"]["duration_ms"] == snapshot.WEEK_MS
+    assert wins["agy-cli:5h"]["used_pct"] == 15.8
+    assert wins["agy-cli:5h"]["duration_ms"] == 5 * 3600000
+
+
+def test_agy_windows_parses_usage_json_and_filters_placeholder(monkeypatch, tmp_path):
+    cache = tmp_path / "agy-usage.json"
+    monkeypatch.setattr(snapshot, "AGY_CACHE", cache)
+    monkeypatch.setattr(snapshot, "find_agy", lambda: "/fake/agy")
+    usage_line = json.dumps({
+        "status": "SUCCESS",
+        "num_turns": 0,
+        "command": {
+            "name": "usage",
+            "data": {
+                "groups": [
+                    {
+                        "name": "Gemini Models",
+                        "buckets": [
+                            {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": 0.86,
+                             "reset_time": "2026-12-03T07:07:30Z"},
+                            {"id": "gemini-5h", "window": "5h", "remaining_fraction": 0.83,
+                             "reset_time": "2026-11-26T17:07:30Z"},
+                        ],
+                    },
+                    {
+                        "name": "Claude and GPT models",
+                        "buckets": [
+                            {"id": "3p-weekly", "window": "weekly", "remaining_fraction": 0.5,
+                             "reset_time": "2026-12-02T14:23:23Z"},
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+    seen_env = {}
+
+    def fake_run(cmd, **kw):
+        seen_env.update(kw.get("env") or {})
+        assert cmd == ["/fake/agy", "-p", "/usage", "--output-format", "json", "--print-timeout", "20s"]
+        return type("R", (), {"stdout": "log line\n" + usage_line + "\n"})()
+
+    monkeypatch.setattr(snapshot.subprocess, "run", fake_run)
+    wins = snapshot.agy_windows()
+    assert seen_env.get("AGY_CLI_DISABLE_AUTO_UPDATE") == "true"
+    assert wins["agy-cli:primary"]["used_pct"] == 14.0
+    assert wins["agy-cli:primary"]["duration_ms"] == snapshot.WEEK_MS
+    assert wins["agy-cli:5h"]["used_pct"] == 17.0
+    assert wins["agy-cli:5h"]["duration_ms"] == 5 * 3600000
+    assert cache.exists()
+
+
+def test_agy_windows_skips_epoch_and_disabled(monkeypatch, tmp_path):
+    cache = tmp_path / "agy-usage.json"
+    payload = {
+        "observed_at_ms": int(time.time() * 1000),
+        "usage": {
+            "status": "SUCCESS",
+            "command": {
+                "name": "usage",
+                "data": {
+                    "groups": [{
+                        "name": "Gemini Models",
+                        "buckets": [
+                            {"window": "weekly", "remaining_fraction": 1.0, "reset_time": "1970-01-01T00:00:00Z"},
+                            {"window": "5h", "remaining_fraction": 0.5, "reset_time": "2026-11-26T17:07:30Z", "disabled": True},
+                        ],
+                    }],
+                },
+            },
+        },
+    }
+    cache.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(snapshot, "AGY_CACHE", cache)
+    assert snapshot.agy_windows() == {}
+
+
+def test_agy_windows_missing_binary_or_timeout_falls_back(monkeypatch, tmp_path):
+    cache = tmp_path / "agy-usage.json"
+    monkeypatch.setattr(snapshot, "AGY_CACHE", cache)
+    monkeypatch.setattr(snapshot, "find_agy", lambda: None)
+    assert snapshot.agy_windows() == {}
+
+    # 已有旧缓存但超时：退回旧缓存而不是崩
+    old = {
+        "observed_at_ms": int(time.time() * 1000) - 600000,
+        "usage": {
+            "status": "SUCCESS",
+            "command": {"name": "usage", "data": {"groups": [{"name": "Gemini Models", "buckets": [
+                {"window": "weekly", "remaining_fraction": 0.75, "reset_time": "2026-12-03T07:07:30Z"}
+            ]}]}},
+        },
+    }
+    cache.write_text(json.dumps(old), encoding="utf-8")
+    os.utime(cache, (time.time() - 1000, time.time() - 1000))
+    monkeypatch.setattr(snapshot, "find_agy", lambda: "/fake/agy")
+
+    def boom(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="agy", timeout=30)
+
+    monkeypatch.setattr(snapshot.subprocess, "run", boom)
+    wins = snapshot.agy_windows()
+    assert wins["agy-cli:primary"]["used_pct"] == 25.0
 
 
 def run_snapshot(tmp_path, slots_conf):

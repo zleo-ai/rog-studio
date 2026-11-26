@@ -146,7 +146,7 @@ def watch_heartbeat(hb, seen):
 
 def conf():
     try:
-        return {**DEFAULTS, **json.loads(CONF.read_text())}
+        return {**DEFAULTS, **json.loads(CONF.read_text(encoding="utf-8"))}
     except (OSError, ValueError):
         return dict(DEFAULTS)
 
@@ -275,7 +275,7 @@ def push_round(scr, c, turn, pushed_videos, last, native=False):
     else:  # 整屏：视频和用量大图轮流放
         dev.set_media(([video.name] if video else []) + [name], play_mode="Cycle" if video else "Single")
         dev.set_slots(["Date&Time", "CPU Temperature", "GPU Temperature"])
-    colors = json.loads((ROOT / "themes" / theme / "theme.json").read_text())["colors"]
+    colors = json.loads((ROOT / "themes" / theme / "theme.json").read_text(encoding="utf-8"))["colors"]
     dev.set_colors(colors["title"], colors["content"])
     dev.screen.time_zone = host_tz()
     dev.apply()
@@ -286,6 +286,11 @@ def push_round(scr, c, turn, pushed_videos, last, native=False):
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
     a = ap.parse_args()
@@ -332,10 +337,11 @@ def main():
                     mode = {"full": c["layout"] != "split", "show": c["full_show_seconds"], "hide": c["full_hide_seconds"],
                             "width": int(c["panel_width"]) if c["panel_glass"] else 634, "glass": bool(c["panel_glass"]),
                             "hud": bool(c["hud"]), "hudItems": list(c["hud_items"])}
-                    if mode != sent_mode:  # 只改了浮出节奏：马上送，不用重发 config
+                    mode_sig = (mode, c.get("quota_slots"))
+                    if mode_sig != sent_mode:  # 只改了浮出节奏或槽位：马上送，不用重发 config
                         data_at = 0
                     if fresh or time.time() - data_at >= NATIVE_DATA_S:
-                        sent_mode = mode
+                        sent_mode = mode_sig
                         native.send({"t": "state", "theme": native_panel.theme_spec(c["theme"]), "data": native_panel.fresh_data(), "mode": mode})
                         if fresh or data_at == 0:
                             say(f"原生面板已连上：{c['theme']}")

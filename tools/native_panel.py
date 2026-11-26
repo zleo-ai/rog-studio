@@ -42,7 +42,9 @@ def say(msg):
 
 
 def adb(*args, check=True, capture=False, timeout=120):
-    r = subprocess.run([hostsys.adb(), *args], check=check, timeout=timeout, capture_output=capture, text=capture, **hostsys.no_window())
+    kw = {"encoding": "utf-8", "errors": "replace"} if capture else {}
+    r = subprocess.run([hostsys.adb(), *args], check=check, timeout=timeout, capture_output=capture, text=capture,
+                       stdin=subprocess.DEVNULL, **kw, **hostsys.no_window())
     return r.stdout if capture else None
 
 
@@ -77,8 +79,8 @@ def font_source(name):
 
 def theme_spec(theme):
     tdir = ROOT / "themes" / theme
-    meta = json.loads((tdir / "theme.json").read_text())
-    css = (tdir / "theme.css").read_text()
+    meta = json.loads((tdir / "theme.json").read_text(encoding="utf-8"))
+    css = (tdir / "theme.css").read_text(encoding="utf-8")
     vars_ = dict(re.findall(r"--([\w-]+):([^;}]+)", css))
     spec = {
         "id": theme,
@@ -100,10 +102,11 @@ def theme_spec(theme):
 
 def render_logo(svg, out):
     """用无头 Chrome 把图标画成 256×256 的透明底 PNG；单色图标画成白色，屏上再按主题上色。"""
-    body = svg.read_text().replace('height="1em"', 'height="256"').replace('width="1em"', 'width="256"')
+    body = svg.read_text(encoding="utf-8").replace('height="1em"', 'height="256"').replace('width="1em"', 'width="256"')
     page = out.with_suffix(".html")
-    page.write_text(f'<!doctype html><body style="margin:0;background:transparent;color:#fff">{body}</body>')
+    page.write_text(f'<!doctype html><body style="margin:0;background:transparent;color:#fff">{body}</body>', encoding="utf-8")
     prof = OUT / "native" / "chrome"
+    prof.mkdir(parents=True, exist_ok=True)
     subprocess.run([hostsys.chrome(), "--headless=new", f"--user-data-dir={prof}", "--force-device-scale-factor=1",
                     "--hide-scrollbars", "--default-background-color=00000000", "--window-size=256,256",
                     f"--screenshot={out}", page.as_uri()], check=True, capture_output=True, timeout=60, **hostsys.no_window())
@@ -117,7 +120,7 @@ def build_bundle(theme):
     (BUNDLE / "logos").mkdir(exist_ok=True)
     (BUNDLE / "themes" / theme).mkdir(parents=True, exist_ok=True)
     if not DEX.exists():
-        subprocess.run(hostsys.python_cmd(ROOT / "overlay" / "build.py"), check=True)
+        subprocess.run(hostsys.python_cmd(ROOT / "overlay" / "build.py"), check=True, **hostsys.no_window())
     shutil.copy2(DEX, BUNDLE / "panel.dex")
     for role in spec["fonts"].values():
         if not role:
@@ -138,7 +141,7 @@ def build_bundle(theme):
 def digest(path):
     h = hashlib.sha256()
     for f in sorted(p for p in path.rglob("*") if p.is_file() and p.name != "bundle.sha"):
-        h.update(str(f.relative_to(path)).encode())
+        h.update(f.relative_to(path).as_posix().encode("utf-8"))
         h.update(f.read_bytes())
     return h.hexdigest()
 
@@ -248,7 +251,7 @@ def fresh_data(stale_minutes=None):
     if stale_minutes is not None:
         cmd += ["--stale-minutes", str(stale_minutes)]
     subprocess.run(cmd, check=True, capture_output=True, **hostsys.no_window())
-    data = json.loads(out.read_text())
+    data = json.loads(out.read_text(encoding="utf-8"))
     data["tz"] = host_tz()
     if stale_minutes is not None:  # 演示过期样子：把生成时间往前挪
         data["generatedAtMs"] -= stale_minutes * 60000
