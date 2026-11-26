@@ -258,6 +258,10 @@ public final class RyuoPanel {
         float k = Math.min(1f, (now - animStart) / (float) ANIM_MS);
         float e = 1 - (float) Math.pow(1 - k, 3);
         for (Row r : d.rows) {
+            if (r.missing) {
+                shown.remove(r.key);
+                continue;
+            }
             float a = from.containsKey(r.key) ? from.get(r.key) : 0f;
             shown.put(r.key, a + (r.used - a) * e);
         }
@@ -349,6 +353,7 @@ public final class RyuoPanel {
 
     static final class Row {
         String key, name, sub, pace, tone, secondLabel;
+        boolean missing;
         float used;
         int secondUsed = -1;
         long startMs, resetMs;
@@ -366,20 +371,22 @@ public final class RyuoPanel {
             JSONArray a = j.getJSONArray("rows");
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.getJSONObject(i);
-                if (o.optBoolean("missing")) continue;
                 Row r = new Row();
                 r.key = o.getString("key");
                 r.name = o.getString("name");
-                r.sub = o.getString("sub");
-                r.pace = o.getString("pace");
-                r.tone = o.getString("tone");
-                r.used = (float) o.getDouble("used");
-                r.startMs = o.getLong("startMs");
-                r.resetMs = o.getLong("resetMs");
-                JSONObject s = o.optJSONObject("second");
-                if (s != null) {
-                    r.secondLabel = s.getString("label");
-                    r.secondUsed = s.getInt("used");
+                r.sub = o.optString("sub", "");
+                r.missing = o.optBoolean("missing", false);
+                if (!r.missing) {
+                    r.pace = o.getString("pace");
+                    r.tone = o.getString("tone");
+                    r.used = (float) o.getDouble("used");
+                    r.startMs = o.getLong("startMs");
+                    r.resetMs = o.getLong("resetMs");
+                    JSONObject s = o.optJSONObject("second");
+                    if (s != null) {
+                        r.secondLabel = s.getString("label");
+                        r.secondUsed = s.getInt("used");
+                    }
                 }
                 d.rows.add(r);
             }
@@ -391,6 +398,7 @@ public final class RyuoPanel {
 
     static final class Painter {
         static final String WEEKDAY = "日一二三四五六";
+        static final String NA = "暂无数据";
         final Canvas c;
         final Theme th;
         final Data d;
@@ -411,7 +419,10 @@ public final class RyuoPanel {
             this.shown = shown;
             this.now = now;
             this.stale = now - d.generatedAtMs > STALE_AFTER_MS;
-            soon = new ArrayList<>(d.rows);
+            soon = new ArrayList<>();
+            for (Row r : d.rows) {
+                if (!r.missing) soon.add(r);
+            }
             soon.sort((a, b) -> Long.compare(a.resetMs, b.resetMs));
         }
 
@@ -475,26 +486,28 @@ public final class RyuoPanel {
             c.drawText(String.format("%02d", t.get(Calendar.SECOND)), x0 + cp.measureText(hm) + 12, 276, font(th.num, 54, th.accent, 0));
 
             // 右上：下一个重置
-            Row nx = soon.get(0);
-            String[] in = resetIn(nx);
-            TextPaint lp = font(th.text, 32, th.dim, .06f);
-            TextPaint namep = font(th.name, 40, th.ink, 0);
-            String lead = "下一个重置";
-            float w = namep.measureText(nx.name), lx = x1 - w;
-            c.drawText(nx.name, lx, 112, namep);
-            if (th.logos.containsKey(nx.key)) {
-                logo(nx.key, lx - 30, 98, 40);
-                lx -= 60;
+            if (!soon.isEmpty()) {
+                Row nx = soon.get(0);
+                String[] in = resetIn(nx);
+                TextPaint lp = font(th.text, 32, th.dim, .06f);
+                TextPaint namep = font(th.name, 40, th.ink, 0);
+                String lead = "下一个重置";
+                float w = namep.measureText(nx.name), lx = x1 - w;
+                c.drawText(nx.name, lx, 112, namep);
+                if (th.logos.containsKey(nx.key)) {
+                    logo(nx.key, lx - 30, 98, 40);
+                    lx -= 60;
+                }
+                c.drawText(lead, lx - lp.measureText(lead) - 16, 112, lp);
+                TextPaint np = font(th.num, 120, th.ink, -.03f);
+                TextPaint up = font(th.text, 32, th.dim, 0);
+                String unit = in[1] + "后";
+                float uw = up.measureText(unit);
+                c.drawText(unit, x1 - uw, 226, up);
+                c.drawText(in[0], x1 - uw - 12 - np.measureText(in[0]), 226, np);
+                String left = "重置前还剩 " + Math.round(100 - nx.used) + "%";
+                c.drawText(left, x1 - lp.measureText(left), 276, font(th.text, 28, th.dim, 0));
             }
-            c.drawText(lead, lx - lp.measureText(lead) - 16, 112, lp);
-            TextPaint np = font(th.num, 120, th.ink, -.03f);
-            TextPaint up = font(th.text, 32, th.dim, 0);
-            String unit = in[1] + "后";
-            float uw = up.measureText(unit);
-            c.drawText(unit, x1 - uw, 226, up);
-            c.drawText(in[0], x1 - uw - 12 - np.measureText(in[0]), 226, np);
-            String left = "重置前还剩 " + Math.round(100 - nx.used) + "%";
-            c.drawText(left, x1 - lp.measureText(left), 276, font(th.text, 28, th.dim, 0));
 
             float bottom = H - 66, legTop = bottom - 30;
             String legend = "orbits".equals(th.layout) ? "每一道光环是一家，亮的是已经用掉的，白点是这一期的时间走到哪了"
@@ -625,8 +638,8 @@ public final class RyuoPanel {
         /** 仪表下面三行字：名字、小字、几号重置。返回下沿。 */
         float bigLabels(Row r, float cx, float top, String sub) {
             text(r.name, cx, top + 8, 60, font(th.name, 48, th.ink, 0), 1);
-            text(sub, cx, top + 76, 34, font(th.text, 27, hot(r) ? th.hot : th.dim, 0), 1);
-            text(resetAt(r) + " 重置", cx, top + 118, 30, font(th.mono, 24, alpha(th.ink, .55f), 0), 1);
+            text(sub, cx, top + 76, 34, font(th.text, 27, subColor(r), 0), 1);
+            if (!r.missing) text(resetAt(r) + " 重置", cx, top + 118, 30, font(th.mono, 24, alpha(th.ink, .55f), 0), 1);
             return top + 148;
         }
 
@@ -642,11 +655,11 @@ public final class RyuoPanel {
             float tubeH = 360, h = 56 + 16 + 112 + 26 + tubeH + 148, top = (rowTop + rowBottom - h) / 2;
             int s = gaugeBegin(new RectF(cx - colW / 2, top, cx + colW / 2, top + h - 148));
             logo(r.key, cx, top + 28, 56);
-            numWithUnit(usedText(r), "%", cx, top + 56 + 16, 112, font(th.num, 118, th.ink, 0), 40, 2, 1);
+            pct(r, cx, top + 56 + 16, 112, font(th.num, 118, th.ink, 0), 40, 2, 1);
             float tt = top + 56 + 16 + 112 + 26;
             tube(r, cx, tt, tubeH, 14, 54);
             gaugeEnd(s);
-            bigLabels(r, cx, tt + tubeH, r.sub + " · " + r.pace);
+            bigLabels(r, cx, tt + tubeH, r.missing ? NA : r.sub + " · " + r.pace);
         }
 
         void bigCard(Row r, float cx, float colW, float top, float bottom) {
@@ -658,7 +671,7 @@ public final class RyuoPanel {
             chip(chip, 24);
             logo(r.key, cx, chip.centerY(), 46);
             y += 84 + 20;
-            numWithUnit(usedText(r), "%", cx, y, 128, font(th.num, 150, th.ink, -.04f), 46, 2, 1);
+            pct(r, cx, y, 128, font(th.num, 150, th.ink, -.04f), 46, 2, 1);
             y += 128 + 20;
             capsule(r, new RectF(card.left + 24, y, card.right - 24, y + 18));
             y += 18 + 20 - 8;
@@ -670,37 +683,39 @@ public final class RyuoPanel {
             boolean tubes = "tubes".equals(th.layout);
             float x0 = tubes ? 84 : 46, x1 = W - 46, y = 72;
             text(th.next, x0, y, 62, font(th.head, 50, th.ink, .08f), 0);
-            Row nx = soon.get(0);
-            y += 62 + 40;
-            float lx = x0;
-            if (th.logos.containsKey(nx.key)) {
-                logo(nx.key, x0 + 32, y + 32, 64);
-                lx += 64 + 18;
-            }
-            text(nx.name, lx, y, 64, font(th.name, 44, th.ink, 0), 0);
-            y += 64 + 18;
-            String[] in = resetIn(nx);
-            TextPaint np = font(th.num, 120, th.ink, -.03f);
-            Paint.FontMetrics fm = np.getFontMetrics();
-            float base = y + (120 - (fm.descent - fm.ascent)) / 2 - fm.ascent;
-            c.drawText(in[0], x0, base, np);
-            c.drawText(in[1] + "后重置", x0 + np.measureText(in[0]) + 10, base, font(th.text, 30, th.dim, 0));
-            y += 120 + 10;
-            text("重置前还剩 " + Math.round(100 - nx.used) + "%", x0, y, 34, font(th.text, 27, th.dim, 0), 0);
-            y += 34 + 46;
-            p.reset();
-            for (Row r : soon) {
-                p.setColor(th.line);
-                c.drawRect(x0, y, x1, y + 1, p);
-                float mid = y + 1 + 20 + 19;
-                float tx = x0;
-                if (th.logos.containsKey(r.key)) {
-                    logo(r.key, x0 + 18, mid, 36);
-                    tx += 36 + 16;
+            if (!soon.isEmpty()) {
+                Row nx = soon.get(0);
+                y += 62 + 40;
+                float lx = x0;
+                if (th.logos.containsKey(nx.key)) {
+                    logo(nx.key, x0 + 32, y + 32, 64);
+                    lx += 64 + 18;
                 }
-                text(r.name, tx, mid - 19, 38, font(th.text, 30, th.ink, 0), 0);
-                text(resetAt(r), x1, mid - 19, 38, font(th.mono, 26, th.dim, 0), 2);
-                y += 1 + 20 + 38 + 20;
+                text(nx.name, lx, y, 64, font(th.name, 44, th.ink, 0), 0);
+                y += 64 + 18;
+                String[] in = resetIn(nx);
+                TextPaint np = font(th.num, 120, th.ink, -.03f);
+                Paint.FontMetrics fm = np.getFontMetrics();
+                float base = y + (120 - (fm.descent - fm.ascent)) / 2 - fm.ascent;
+                c.drawText(in[0], x0, base, np);
+                c.drawText(in[1] + "后重置", x0 + np.measureText(in[0]) + 10, base, font(th.text, 30, th.dim, 0));
+                y += 120 + 10;
+                text("重置前还剩 " + Math.round(100 - nx.used) + "%", x0, y, 34, font(th.text, 27, th.dim, 0), 0);
+                y += 34 + 46;
+                p.reset();
+                for (Row r : soon) {
+                    p.setColor(th.line);
+                    c.drawRect(x0, y, x1, y + 1, p);
+                    float mid = y + 1 + 20 + 19;
+                    float tx = x0;
+                    if (th.logos.containsKey(r.key)) {
+                        logo(r.key, x0 + 18, mid, 36);
+                        tx += 36 + 16;
+                    }
+                    text(r.name, tx, mid - 19, 38, font(th.text, 30, th.ink, 0), 0);
+                    text(resetAt(r), x1, mid - 19, 38, font(th.mono, 26, th.dim, 0), 2);
+                    y += 1 + 20 + 38 + 20;
+                }
             }
             String stamp = stale ? "● 数据停在 " + hm(d.generatedAtMs) : "实时更新";
             text(stamp, x0, H - 66 - 31, 31, font(th.text, 25, stale ? th.warn : th.dim, 0), 0);
@@ -723,11 +738,20 @@ public final class RyuoPanel {
         }
 
         boolean hot(Row r) {
-            return "hot".equals(r.tone);
+            return !r.missing && "hot".equals(r.tone);
+        }
+
+        int subColor(Row r) {
+            return r.missing ? alpha(th.dim, .8f) : hot(r) ? th.hot : th.dim;
         }
 
         String subText(Row r) {
+            if (r.missing) return NA;
             return r.secondLabel != null ? r.sub + " · " + r.secondLabel + " " + r.secondUsed + "%" : r.sub + " · " + r.pace;
+        }
+
+        String resetText(Row r) {
+            return r.missing ? NA : resetAt(r) + " 重置";
         }
 
         /** 「6 天」「3 小时」「12 分钟」：数字和单位分开，单位后面接「后重置」。 */
@@ -872,6 +896,7 @@ public final class RyuoPanel {
 
         /** 「接下来」块的内容（不含外框）：返回内容高度。dry=true 时只量不画。 */
         float nextBody(String label, Typeface kFont, float kSize, float kSpacing, float x0, float x1, float top, boolean dry) {
+            if (soon.isEmpty()) return 0;
             Row nx = soon.get(0);
             float y = top, kLh = kSize * 1.25f;
             if (!dry) text(label, x0, y, kLh, font(kFont, kSize, kColor, kSpacing), 0);
@@ -935,9 +960,10 @@ public final class RyuoPanel {
                 ring(r, cx, top, 214, 30);
                 gaugeEnd(s);
                 text(r.name, cx, top + 210, 40, font(th.name, 32, th.ink, .02f), 1);
-                text(subText(r), cx, top + 254, 27, font(th.text, 21, hot(r) ? th.hot : th.dim, 0), 1);
+                text(subText(r), cx, top + 254, 27, font(th.text, 21, subColor(r), 0), 1);
             }
             // 接下来：带角标的框，贴底
+            if (soon.isEmpty()) return;
             kColor = th.accent;
             float ix0 = x0 + 22, ix1 = x1 - 22;
             float bodyH = nextBody(th.next, th.head, 28, .12f, ix0, ix1, 0, true);
@@ -978,23 +1004,25 @@ public final class RyuoPanel {
             p.setStrokeWidth(sw);
             p.setColor(th.line);
             c.drawArc(oval, 135, 270, false, p);
-            float u = used(r);
-            float sweep = Math.max(.4f, 270 * u / 100);
-            boolean hot = hot(r);
-            p.setShader(new LinearGradient(cx - R, cy + R, cx + R, cy - R, hot ? 0xFFFF7A45 : th.accent2, hot ? th.hot : th.accent, Shader.TileMode.CLAMP));
-            p.setMaskFilter(new BlurMaskFilter(size * .02f * 2, BlurMaskFilter.Blur.NORMAL));
-            p.setAlpha(140);
-            c.drawArc(oval, 135, sweep, false, p);
-            p.setMaskFilter(null);
-            p.setAlpha(255);
-            c.drawArc(oval, 135, sweep, false, p);
-            p.setShader(null);
-            // 白色刻线：这一期的时间走到哪了
-            double ea = Math.toRadians(135 + 270 * elapsed(r) / 100);
-            float m1 = R - sw * 1.2f, m2 = R + sw * 1.2f;
-            p.setStrokeWidth(4);
-            p.setColor(th.mark);
-            c.drawLine(cx + m1 * (float) Math.cos(ea), cy + m1 * (float) Math.sin(ea), cx + m2 * (float) Math.cos(ea), cy + m2 * (float) Math.sin(ea), p);
+            if (!r.missing) {
+                float u = used(r);
+                float sweep = Math.max(.4f, 270 * u / 100);
+                boolean hot = hot(r);
+                p.setShader(new LinearGradient(cx - R, cy + R, cx + R, cy - R, hot ? 0xFFFF7A45 : th.accent2, hot ? th.hot : th.accent, Shader.TileMode.CLAMP));
+                p.setMaskFilter(new BlurMaskFilter(size * .02f * 2, BlurMaskFilter.Blur.NORMAL));
+                p.setAlpha(140);
+                c.drawArc(oval, 135, sweep, false, p);
+                p.setMaskFilter(null);
+                p.setAlpha(255);
+                c.drawArc(oval, 135, sweep, false, p);
+                p.setShader(null);
+                // 白色刻线：这一期的时间走到哪了
+                double ea = Math.toRadians(135 + 270 * elapsed(r) / 100);
+                float m1 = R - sw * 1.2f, m2 = R + sw * 1.2f;
+                p.setStrokeWidth(4);
+                p.setColor(th.mark);
+                c.drawLine(cx + m1 * (float) Math.cos(ea), cy + m1 * (float) Math.sin(ea), cx + m2 * (float) Math.cos(ea), cy + m2 * (float) Math.sin(ea), p);
+            }
             // 中间：图标 + 百分数
             float numSize = size * .3f, numLh = numSize * .9f;
             boolean hasLogo = th.logos.containsKey(r.key);
@@ -1004,7 +1032,19 @@ public final class RyuoPanel {
                 logo(r.key, cx, y + logoPx / 2, logoPx);
                 y += logoPx + 4;
             }
-            numWithUnit(usedText(r), "%", cx, y, numLh, font(th.num, numSize, th.ink, -.03f), numSize * .36f, 3, 1);
+            pct(r, cx, y, numLh, font(th.num, numSize, th.ink, -.03f), numSize * .36f, 3, 1);
+        }
+
+        /** 读不到额度时画破折号（不带 %），否则画大数字 + 百分号。 */
+        void pct(Row r, float x, float top, float lh, TextPaint np, float unitSize, float gap, int align) {
+            if (r.missing) {
+                int old = np.getColor();
+                np.setColor(alpha(th.dim, .6f));
+                text("—", x, top, lh, np, align);
+                np.setColor(old);
+                return;
+            }
+            numWithUnit(usedText(r), "%", x, top, lh, np, unitSize, gap, align);
         }
 
         /** 大数字后面跟一个小单位，比如 29%。align 同 text()。 */
@@ -1034,14 +1074,18 @@ public final class RyuoPanel {
         void tubes() {
             float x0 = 76, x1 = W - 36;
             float y = header(th.title, x0, x1, 46, th.head, 50, th.accent, th.wideTitle ? .32f : .06f);
-            kColor = th.accent;
-            float bodyH = nextBody(th.next, th.head, 26, th.wideTitle ? .3f : .12f, x0, x1, 0, true);
-            float nt = H - 42 - bodyH - 22 - 1;
-            p.reset();
-            p.setColor(th.line);
-            c.drawRect(x0, nt, x1, nt + 1, p);
-            nextBody(th.next, th.head, 26, th.wideTitle ? .3f : .12f, x0, x1, nt + 1 + 22, false);
-            float colsTop = y + 40, colsBottom = nt - 30;
+            float colsBottom = H - 42;
+            if (!soon.isEmpty()) {
+                kColor = th.accent;
+                float bodyH = nextBody(th.next, th.head, 26, th.wideTitle ? .3f : .12f, x0, x1, 0, true);
+                float nt = H - 42 - bodyH - 22 - 1;
+                p.reset();
+                p.setColor(th.line);
+                c.drawRect(x0, nt, x1, nt + 1, p);
+                nextBody(th.next, th.head, 26, th.wideTitle ? .3f : .12f, x0, x1, nt + 1 + 22, false);
+                colsBottom = nt - 30;
+            }
+            float colsTop = y + 40;
             float fixed = 40 + 16 + 70 + 22 + 20 + 40 + 4 + 27;
             float tubeH = Math.min(460, colsBottom - colsTop - fixed);
             float colW = (x1 - x0) / 4;
@@ -1051,12 +1095,13 @@ public final class RyuoPanel {
                 float top = colsTop;
                 int s = gaugeBegin(new RectF(cx - colW / 2, top, cx + colW / 2, top + 40 + 16 + 70 + 22 + tubeH + 2));
                 logo(r.key, cx, top + 20, 40);
-                numWithUnit(usedText(r), "%", cx, top + 40 + 16, 70, font(th.num, 74, th.ink, 0), 28, 1, 1);
+                pct(r, cx, top + 40 + 16, 70, font(th.num, 74, th.ink, 0), 28, 1, 1);
                 float tt = top + 40 + 16 + 70 + 22, tb = tt + tubeH;
                 tube(r, cx, tt, tubeH, 10, 36);
                 gaugeEnd(s);
                 text(r.name, cx, tb + 20, 40, font(th.name, 32, th.ink, .04f), 1);
-                text(r.sub, cx, tb + 64, 27, font(th.text, 21, hot(r) ? th.hot : alpha(th.accent, .85f), 0), 1);
+                int sc = r.missing ? alpha(th.dim, .8f) : hot(r) ? th.hot : alpha(th.accent, .85f);
+                text(r.missing ? NA : r.sub, cx, tb + 64, 27, font(th.text, 21, sc, 0), 1);
             }
         }
 
@@ -1078,8 +1123,10 @@ public final class RyuoPanel {
                 legendRow(r, i, x0, x1, ly + 11, 60, 6, 46, 28, 28, 20, 46, 20, 14);
                 ly += 81;
             }
-            Row nx = soon.get(0);
-            text(nx.name + " 重置前还剩 " + Math.round(100 - nx.used) + "% · " + paceLine(nx), x0, H - 42 - 31, 31, font(th.text, 22, th.dim, 0), 0);
+            if (!soon.isEmpty()) {
+                Row nx = soon.get(0);
+                text(nx.name + " 重置前还剩 " + Math.round(100 - nx.used) + "% · " + paceLine(nx), x0, H - 42 - 31, 31, font(th.text, 22, th.dim, 0), 0);
+            }
         }
 
         void bigOrbits(float x0, float x1, float rowTop, float rowBottom) {
@@ -1114,8 +1161,8 @@ public final class RyuoPanel {
             }
             float nLh = nameSize * 1.2f, sLh = subSize * 1.3f, bt = mid - (nLh + sLh) / 2;
             text(r.name, x, bt, nLh, font(th.name, nameSize, th.ink, 0), 0);
-            text(resetAt(r) + " 重置", x, bt + nLh, sLh, font(th.text, subSize, hot(r) ? th.hot : th.dim, 0), 0);
-            numWithUnit(usedText(r), "%", x1, mid - pcSize / 2, pcSize, font(th.num, pcSize, th.ink, -.02f), pcUnit, 2, 2);
+            text(resetText(r), x, bt + nLh, sLh, font(th.text, subSize, subColor(r), 0), 0);
+            pct(r, x1, mid - pcSize / 2, pcSize, font(th.num, pcSize, th.ink, -.02f), pcUnit, 2, 2);
         }
 
         /** 四道同心光环，外圈是第一家；中间写最近一次重置的倒计时。 */
@@ -1132,6 +1179,7 @@ public final class RyuoPanel {
                 p.setStrokeWidth(sw);
                 p.setColor(alpha(col, .13f));
                 c.drawCircle(cx, cy, R, p);
+                if (r.missing) continue;
                 float sweep = Math.max(.4f, 360 * used(r) / 100);
                 p.setStrokeCap(Paint.Cap.ROUND);
                 p.setColor(alpha(col, .6f));
@@ -1145,6 +1193,7 @@ public final class RyuoPanel {
                 p.setColor(th.mark);
                 c.drawCircle(cx + R * (float) Math.cos(ea), cy + R * (float) Math.sin(ea), sw * .2f, p);
             }
+            if (soon.isEmpty()) return;
             Row nx = soon.get(0);
             String[] in = resetIn(nx);
             float k = size / 500;
@@ -1166,12 +1215,16 @@ public final class RyuoPanel {
         void cards() {
             float x0 = 42, x1 = W - 42;
             float y = header(th.title, x0, x1, 46, th.head, 48, th.ink, .01f);
-            kColor = th.dim;
-            float bodyH = nextBody(th.next, th.text, 22, .2f, x0 + 24, x1 - 24, 0, true);
-            float bh = 18 + bodyH + 18, bt = H - 42 - bh;
-            glass(new RectF(x0, bt, x1, bt + bh), 28, .04f, .04f, .07f);
-            nextBody(th.next, th.text, 22, .2f, x0 + 24, x1 - 24, bt + 18, false);
-            float top = y + 28, bottom = bt - 16;
+            float bottom = H - 42;
+            if (!soon.isEmpty()) {
+                kColor = th.dim;
+                float bodyH = nextBody(th.next, th.text, 22, .2f, x0 + 24, x1 - 24, 0, true);
+                float bh = 18 + bodyH + 18, bt = H - 42 - bh;
+                glass(new RectF(x0, bt, x1, bt + bh), 28, .04f, .04f, .07f);
+                nextBody(th.next, th.text, 22, .2f, x0 + 24, x1 - 24, bt + 18, false);
+                bottom = bt - 16;
+            }
+            float top = y + 28;
             int n = Math.min(4, d.rows.size());
             float ch = (bottom - top - 14 * (n - 1)) / n;
             for (int i = 0; i < n; i++) {
@@ -1188,8 +1241,8 @@ public final class RyuoPanel {
                 logo(r.key, chip.centerX(), chip.centerY(), 32);
                 float wx = cx0 + 58 + 16;
                 text(r.name, wx, mid - 31.5f, 35, font(th.name, 32, th.ink, 0), 0);
-                text(subText(r), wx, mid + 5.5f, 26, font(th.text, 21, hot(r) ? th.hot : th.dim, 0), 0);
-                numWithUnit(usedText(r), "%", cx1, contentTop, rowH, font(th.num, 86, th.ink, -.04f), 30, 2, 2);
+                text(subText(r), wx, mid + 5.5f, 26, font(th.text, 21, subColor(r), 0), 0);
+                pct(r, cx1, contentTop, rowH, font(th.num, 86, th.ink, -.04f), 30, 2, 2);
                 // 胶囊条
                 float capTop = contentTop + rowH + 14;
                 capsule(r, new RectF(cx0, capTop, cx1, capTop + 14));
@@ -1217,6 +1270,7 @@ public final class RyuoPanel {
             p.setColor(alpha(th.accent, .28f));
             c.drawRoundRect(new RectF(tube.left + .5f, tube.top + .5f, tube.right - .5f, tube.bottom - .5f), rad - .5f, rad - .5f, p);
             p.setStyle(Paint.Style.FILL);
+            if (r.missing) return;
             float fh = tubeH * used(r) / 100;
             if (fh > .5f) {
                 int[] g = fill(r);
@@ -1237,6 +1291,7 @@ public final class RyuoPanel {
             p.setAntiAlias(true);
             p.setColor(0x12FFFFFF);
             c.drawRoundRect(cap, rad, rad, p);
+            if (r.missing) return;
             float fw = cap.width() * Math.max(2, used(r)) / 100;
             int[] g = fill(r);
             p.setColor(0xFF000000);

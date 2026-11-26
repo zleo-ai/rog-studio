@@ -9,7 +9,7 @@ A Linux stack for the 2240×1080 curved screen on the ROG RYUO IV SLC 360 ARGB: 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Linux · Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-555555)](#windows)
 
-> In development. Split screen, image push, and the on-panel native overlay have been run on the maintainer's Ubuntu machine with firmware V1.0.7. That session is written up at the end of [`docs/protocol.md`](docs/protocol.md). The driver's 1.0.7 capability row still marks native HEVC as `unknown` and recommends 1920×926 H.264. The Windows installer and its unit tests exist; they have not been installed on a real Windows machine.
+> In development. Split screen, image push, and the on-panel native overlay have been verified on Ubuntu and Windows 11 with firmware V1.0.7. That session is written up at the end of [`docs/protocol.md`](docs/protocol.md). The driver's 1.0.7 capability row still marks native HEVC as `unknown` and recommends 1920×926 H.264.
 
 <p>
 <img src="docs/assets/hero.jpg" alt="Night-rain neon theme, split layout: city scene and clock on the left, AI quota strip on the right" width="100%">
@@ -115,7 +115,7 @@ Both paths need a heartbeat every second (CPU and GPU temperature). After about 
 
 `tools/snapshot.py` asks magpie (`magpie accounts --json`) when it is installed, then fills any missing windows from a snapshot JSON. Point `RYUO_QUOTA_SNAPSHOT` at the file. The default path is `~/.local/state/aios/quota-snapshot.json`. The shape is `{"generated_at_ms", "providers":[{"windows":[{"id","used_pct","resets_at_ms", ...}]}]}`. Window ids are listed at the top of `snapshot.py`.
 
-The four slots default to Claude, Codex, Grok, and Cursor. To swap one out, set `"quota_slots": ["claude", "agy", "grok", "cursor"]` in `config.json` (slot order, up to four; known keys are `claude` `codex` `grok` `cursor` `agy`). Remove the key to go back to the default. The `agy` slot is labelled Gemini and uses the Gemini icon. It has no numbers yet: magpie's `agy-cli` has not reported a quota window, so that slot says 暂无数据 ("no data").
+The four slots default to Claude, Codex, Grok, and Cursor. To swap one out, set `"quota_slots": ["claude", "agy", "grok", "cursor"]` in `config.json` (slot order, up to four; known keys are `claude` `codex` `grok` `cursor` `agy`). Remove the key to go back to the default. The `agy` slot is labelled Gemini and uses the Gemini icon; it queries `agy -p /usage --output-format json` for its 7-day and 5-hour windows (falling back to 暂无数据 / "no data" when unavailable).
 
 When a provider could not be read this time, its slot stays in place with a dash and 暂无数据. Nothing is made up and no provider silently disappears. With neither source, the panel does not invent numbers. `snapshot.py` currently exits because it has no window to rank, and the manager's preview render fails. The manager page, theme switching, and the driver dry-run still work.
 
@@ -165,7 +165,7 @@ Logs and rendered frames live in `~/.local/share/ryuo-studio/`.
 
 ## Windows
 
-> On a real Windows 11 PC the environment, the dry-run push (quota read, rendering, frame building) and the task definitions have been checked. Registering the tasks and driving the screen from Windows have not been tried yet. Open an issue if you hit something.
+> Verified on a real Windows 11 PC: uv setup, scheduled tasks, HID heartbeat, looping video push, on-panel native live rendering (glass split + HUD + four AI quotas), and the localhost manager. Open an issue if you hit something.
 
 You will want:
 
@@ -215,7 +215,6 @@ Differences from Linux:
 - Keyboards. Devices OpenRGB marks as auto-save are skipped.
 - The ROG HARPE II ACE mouse. OpenRGB 1.1 does not recognize it.
 - The real LED count on each RYUO fan. No public figure turned up. Extra LEDs on the header only change how long the chase looks.
-- Running the installer on a real Windows machine.
 
 ## Contributing
 

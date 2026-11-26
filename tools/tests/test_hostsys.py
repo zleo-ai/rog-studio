@@ -111,6 +111,8 @@ def test_gpu_parses_nvidia_smi(monkeypatch):
     monkeypatch.setattr(hostsys.shutil, "which", lambda n: "/x/nvidia-smi" if n == "nvidia-smi" else None)
     monkeypatch.setattr(hostsys.subprocess, "run", lambda *a, **k: types.SimpleNamespace(stdout="46, 3\n"))
     assert hostsys.gpu() == {"temp": 46, "load": 3}
+    monkeypatch.setattr(hostsys.subprocess, "run", lambda *a, **k: types.SimpleNamespace(stdout="43.43, 9\n"))
+    assert hostsys.gpu() == {"temp": 43, "load": 9}
     monkeypatch.setattr(hostsys.shutil, "which", lambda n: None)
     assert hostsys.gpu() is None
 
