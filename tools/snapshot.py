@@ -8,6 +8,7 @@
 """
 import argparse
 import calendar
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -275,8 +276,11 @@ def main():
     wins = {w["id"]: {**w, "observed_at_ms": w.get("observed_at_ms") or snap_gen}
             for p in snap.get("providers", []) for w in p["windows"]}
     if a.stale_minutes is None:
-        wins.update(magpie_windows())
-        wins.update(agy_windows())
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_magpie = pool.submit(magpie_windows)
+            f_agy = pool.submit(agy_windows)
+            wins.update(f_magpie.result())
+            wins.update(f_agy.result())
     picks = [(k, *PROVIDERS[k]) for k in slots()]
     main_ids = [pick[2] for pick in picks if pick[2] in wins]
     seen = [wins[i]["observed_at_ms"] for i in main_ids]

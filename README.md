@@ -9,7 +9,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Linux · Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-555555)](#windows)
 
-> 开发中。维护者在 Ubuntu、固件 V1.0.7 上跑通过分屏、图片推送和屏上原生面板，记录在 [`docs/protocol.md`](docs/protocol.md) 文末。驱动能力表里 1.0.7 的原生 HEVC 仍标成 `unknown`，默认还是推荐 1920×926 的 H.264。Windows 的安装脚本和单元测试写好了，还没在真 Windows 上装过。
+> 开发中。维护者在 Ubuntu 与 Windows 11、固件 V1.0.7 上跑通过分屏、图片推送和屏上原生面板，记录在 [`docs/protocol.md`](docs/protocol.md) 文末。驱动能力表里 1.0.7 的原生 HEVC 仍标成 `unknown`，默认还是推荐 1920×926 的 H.264。
 
 <p>
 <img src="docs/assets/hero.jpg" alt="雨夜霓虹主题的分屏效果：左边是城市夜景和时钟，右边窄条是四家 AI 的额度" width="100%">
@@ -165,7 +165,7 @@ bash desktop/install.sh --no-auto  # 只装，点图标才启动
 
 ## Windows
 
-> 在一台真的 Windows 11 上验过：建环境、演练推送（读额度、出图、组帧）、生成任务定义。还没在 Windows 上注册任务、真正连屏。碰到问题请开 issue。
+> 已在 Windows 11 真机上验过：uv 环境、计划任务注册与自启、HID 心跳、循环视频推送、屏上原生实时面板（玻璃分屏 + HUD + 四家额度）与管理器。碰到问题请开 issue。
 
 要准备的东西：
 
@@ -214,7 +214,6 @@ pwsh -NoProfile -File desktop\install_windows.ps1 -Register    # 注册计划任
 - 键盘。OpenRGB 里标了自动存盘的设备会跳过。
 - 鼠标 ROG HARPE II ACE。OpenRGB 1.1 还不认。
 - 龙王风扇每一把的真实灯数。查不到公开数据；接口上多设几颗灯只影响流光长短。
-- 在 Windows 上注册任务、真正连屏跑一段时间。
 
 ## 参与
 

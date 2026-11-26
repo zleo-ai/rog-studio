@@ -9,7 +9,7 @@ A Linux stack for the 2240×1080 curved screen on the ROG RYUO IV SLC 360 ARGB: 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Linux · Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-555555)](#windows)
 
-> In development. Split screen, image push, and the on-panel native overlay have been run on the maintainer's Ubuntu machine with firmware V1.0.7. That session is written up at the end of [`docs/protocol.md`](docs/protocol.md). The driver's 1.0.7 capability row still marks native HEVC as `unknown` and recommends 1920×926 H.264. The Windows installer and its unit tests exist; they have not been installed on a real Windows machine.
+> In development. Split screen, image push, and the on-panel native overlay have been verified on Ubuntu and Windows 11 with firmware V1.0.7. That session is written up at the end of [`docs/protocol.md`](docs/protocol.md). The driver's 1.0.7 capability row still marks native HEVC as `unknown` and recommends 1920×926 H.264.
 
 <p>
 <img src="docs/assets/hero.jpg" alt="Night-rain neon theme, split layout: city scene and clock on the left, AI quota strip on the right" width="100%">
@@ -165,7 +165,7 @@ Logs and rendered frames live in `~/.local/share/ryuo-studio/`.
 
 ## Windows
 
-> On a real Windows 11 PC the environment, the dry-run push (quota read, rendering, frame building) and the task definitions have been checked. Registering the tasks and driving the screen from Windows have not been tried yet. Open an issue if you hit something.
+> Verified on a real Windows 11 PC: uv setup, scheduled tasks, HID heartbeat, looping video push, on-panel native live rendering (glass split + HUD + four AI quotas), and the localhost manager. Open an issue if you hit something.
 
 You will want:
 
@@ -215,7 +215,6 @@ Differences from Linux:
 - Keyboards. Devices OpenRGB marks as auto-save are skipped.
 - The ROG HARPE II ACE mouse. OpenRGB 1.1 does not recognize it.
 - The real LED count on each RYUO fan. No public figure turned up. Extra LEDs on the header only change how long the chase looks.
-- Running the installer on a real Windows machine.
 
 ## Contributing
 

@@ -285,6 +285,53 @@ def push_round(scr, c, turn, pushed_videos, last, native=False):
     say(f"第 {turn + 1} 轮：{theme} · {'分屏' if layout == 'split' else '整屏'} · {name or '只放视频'}" + ("" if scr.live else f"（演练，已组 {scr.frames_sent()} 帧）"))
 
 
+class DataFetcher:
+    """后台异步拉额度数据，避免 magpie/agy 耗时超过屏上 20 秒静默隐藏阈值导致面板闪烁。"""
+
+    def __init__(self, fetch_fn, cache_path=None):
+        self.fetch_fn = fetch_fn
+        self.lock = threading.Lock()
+        self.latest = None
+        self.version = 0
+        self.busy = False
+        self.last_err = None
+        if cache_path:
+            try:
+                data = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+                data["tz"] = host_tz()
+                self.latest = data
+                self.version = 1
+            except (OSError, ValueError):
+                pass
+
+    def trigger(self):
+        with self.lock:
+            if self.busy:
+                return False
+            self.busy = True
+
+        def work():
+            try:
+                data = self.fetch_fn()
+                with self.lock:
+                    self.latest = data
+                    self.version += 1
+                    self.last_err = None
+            except Exception as e:  # noqa: BLE001 - 后台线程异常记下来，不打断主循环保活
+                with self.lock:
+                    self.last_err = e
+            finally:
+                with self.lock:
+                    self.busy = False
+
+        threading.Thread(target=work, name="ryuo-quota-fetch", daemon=True).start()
+        return True
+
+    def snapshot(self):
+        with self.lock:
+            return self.latest, self.version, self.last_err
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -306,7 +353,8 @@ def main():
     say(f"开始推送（进程 {os.getpid()}，父进程 {os.getppid()}，systemd 调用号 {os.environ.get('INVOCATION_ID', '无')}）"
         + ("" if scr.live else "（演练模式：不连屏幕）") + f"，{memory()}")
     pushed, turn, last = set(), 0, {}
-    applied, data_at, sent_mode = None, 0.0, None
+    applied, fetch_at, sent_mode, sent_ver, fetched_slots = None, 0.0, None, -1, None
+    fetcher = DataFetcher(native_panel.fresh_data, OUT / "native" / "data.json") if native is not None else None
     seen = {"alive": time.time()}
 
     def stopped(signum, _frame):  # systemd 停服务发 SIGTERM；记一行再走，日志里才分得清「被停」和「卡死」
@@ -332,22 +380,36 @@ def main():
                             native_panel.build_bundle(c["theme"])
                         say(f"内存：{memory()}")
                         native.close()  # 下面重连时顺带把新主题的文件同步上去
-                        data_at = 0
+                        fetch_at = 0.0
                     fresh = native.ensure()
                     mode = {"full": c["layout"] != "split", "show": c["full_show_seconds"], "hide": c["full_hide_seconds"],
                             "width": int(c["panel_width"]) if c["panel_glass"] else 634, "glass": bool(c["panel_glass"]),
                             "hud": bool(c["hud"]), "hudItems": list(c["hud_items"])}
                     mode_sig = (mode, c.get("quota_slots"))
-                    if mode_sig != sent_mode:  # 只改了浮出节奏或槽位：马上送，不用重发 config
-                        data_at = 0
-                    if fresh or time.time() - data_at >= NATIVE_DATA_S:
-                        sent_mode = mode_sig
-                        native.send({"t": "state", "theme": native_panel.theme_spec(c["theme"]), "data": native_panel.fresh_data(), "mode": mode})
-                        if fresh or data_at == 0:
-                            say(f"原生面板已连上：{c['theme']}")
-                        data_at = time.time()
+                    if a.once:
+                        data = native_panel.fresh_data()
+                        native.send({"t": "state", "theme": native_panel.theme_spec(c["theme"]), "data": data, "mode": mode})
+                        say(f"原生面板已连上：{c['theme']}")
                     else:
-                        native.send(sys_stats() if c["hud"] else {"t": "ping"})
+                        if c.get("quota_slots") != fetched_slots:
+                            fetch_at = 0.0
+                        if fresh or mode_sig != sent_mode or time.monotonic() - fetch_at >= NATIVE_DATA_S:
+                            if fetcher.trigger():
+                                fetch_at = time.monotonic()
+                                fetched_slots = c.get("quota_slots")
+                        data, ver, err = fetcher.snapshot()
+                        if err is not None:
+                            say(f"读取额度失败：{err}；继续沿用上一份数据")
+                            with fetcher.lock:
+                                fetcher.last_err = None
+                        if data is not None and (fresh or mode_sig != sent_mode or ver != sent_ver):
+                            native.send({"t": "state", "theme": native_panel.theme_spec(c["theme"]), "data": data, "mode": mode})
+                            if fresh or sent_ver < 0:
+                                say(f"原生面板已连上：{c['theme']}")
+                            sent_mode = mode_sig
+                            sent_ver = ver
+                        else:
+                            native.send(sys_stats() if c["hud"] else {"t": "ping"})
                 else:
                     if native is not None and native.sock is not None:
                         native.send({"t": "hide"})

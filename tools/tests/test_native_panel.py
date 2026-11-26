@@ -111,3 +111,31 @@ def test_ryuo_panel_java_retains_missing_rows():
     assert 'static final String NA = "暂无数据";' in src
     assert 'if (!r.missing) soon.add(r);' in src
     assert 'text("—"' in src
+
+
+def test_data_fetcher_loads_cache_and_updates_in_background(tmp_path):
+    import json
+    import threading
+    import time
+
+    cache = tmp_path / "data.json"
+    cache.write_text(json.dumps({"generatedAtMs": 1000, "rows": []}), encoding="utf-8")
+    gate = threading.Event()
+
+    def slow_fetch():
+        gate.wait(timeout=5)
+        return {"generatedAtMs": 2000, "rows": [], "tz": "GMT+08:00"}
+
+    f = pusher.DataFetcher(slow_fetch, cache)
+    d0, v0, e0 = f.snapshot()
+    assert d0["generatedAtMs"] == 1000 and v0 == 1 and e0 is None
+    assert f.trigger() is True
+    assert f.trigger() is False  # 进行中不会重复拉起
+    gate.set()
+    for _ in range(50):
+        d1, v1, e1 = f.snapshot()
+        if v1 > v0:
+            break
+        time.sleep(0.02)
+    assert d1["generatedAtMs"] == 2000 and v1 == 2 and e1 is None
+
