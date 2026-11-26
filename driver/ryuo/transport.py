@@ -109,6 +109,10 @@ class HidTransport(Transport):
             path = found[0]["path"]
         self._dev = hid.device()
         self._dev.open_path(path)
+        # hidapi 的 read(n, 0) 在默认的阻塞模式下是「一直等」，不是「不等」。心跳每秒 drain_replies(0)，
+        # 屏没有回包时会永远卡在那里，心跳停掉、约 10 秒后屏回待机。开非阻塞后 timeout 0 立即返回；
+        # timeout 大于 0 时 hidapi 走 hid_read_timeout，照样按超时等。
+        self._dev.set_nonblocking(1)
 
     @staticmethod
     def find() -> list[dict]:  # pragma: no cover - needs hardware
@@ -127,8 +131,8 @@ class HidTransport(Transport):
         if n < 0:
             raise TransportError("hid write failed")
 
-    def read_report(self, timeout_ms: int = 0) -> bytes:  # pragma: no cover
-        data = self._dev.read(REPORT_SIZE, timeout_ms)
+    def read_report(self, timeout_ms: int = 0) -> bytes:
+        data = self._dev.read(REPORT_SIZE, max(0, timeout_ms))
         return bytes(data)
 
     def close(self) -> None:  # pragma: no cover

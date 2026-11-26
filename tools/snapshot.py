@@ -24,20 +24,40 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "render" / "data.js"
 LOGO_DIR = ROOT / "themes" / "_shared" / "logos"
 # 每家用哪个图标；Claude 保留品牌橙，其余跟随主题文字颜色
-LOGO = {"claude": "claude-color.svg", "codex": "codex.svg", "grok": "grok.svg", "cursor": "cursor-mono.svg"}
+LOGO = {"claude": "claude-color.svg", "codex": "codex.svg", "grok": "grok.svg", "cursor": "cursor-mono.svg",
+        "agy": "gemini-color.svg"}
 STALE_AFTER_MIN = 30
 WEEK_MS = 7 * 24 * 3600 * 1000
 
-# 每家取哪个窗口当主数字、哪个当小字
-PICK = [
-    ("claude", "Claude", "anthropic", "anthropic:7d", "7 天", ("anthropic:5h", "5 小时")),
-    ("codex", "Codex", "openai-codex", "openai-codex:primary", "7 天", None),
-    ("grok", "Grok", "xai-oauth", "xai-oauth:credits:1w", "7 天", ("xai-oauth:product:grokbuild:1w", "Build")),
-    ("cursor", "Cursor", "cursor", "cursor:usd:individual-auto", "本月", ("cursor:usd:individual-api", "其他模型")),
-]
+# 认得的几家：名字、主数字用哪个窗口、窗口说明、小字用哪个窗口
+PROVIDERS = {
+    "claude": ("Claude", "anthropic:7d", "7 天", ("anthropic:5h", "5 小时")),
+    "codex": ("Codex", "openai-codex:primary", "7 天", None),
+    "grok": ("Grok", "xai-oauth:credits:1w", "7 天", ("xai-oauth:product:grokbuild:1w", "Build")),
+    "cursor": ("Cursor", "cursor:usd:individual-auto", "本月", ("cursor:usd:individual-api", "其他模型")),
+    # agy 命令行（magpie 里叫 agy-cli；面板上显示的名字是 Gemini）。magpie 的 agy-cli 还没给出过额度窗口，窗口名和时长都不知道，所以 MAGPIE_MAP 里先不接；
+    # 读不到时这一格照样占着，写「暂无数据」。以后 magpie 读得到了，在 MAGPIE_MAP 加一行 ("agy-cli", "<窗口名>")
+    "agy": ("Gemini", "agy-cli:primary", "额度", None),
+}
+# 面板上四个位置放谁、按什么顺序。想换掉某一家（比如第二格的 Codex 换成 agy），在 config.json 里写
+#   "quota_slots": ["claude", "agy", "grok", "cursor"]
+# 删掉这个键就回到默认
+DEFAULT_SLOTS = ["claude", "codex", "grok", "cursor"]
+CONF = Path.home() / ".config" / "ryuo-studio" / "config.json"
 WEEKDAY = "一二三四五六日"
 
-# 四家都优先直接问 magpie（它自己就在读各家订阅的额度）；问不到的窗口（比如 Grok Build）再用本机快照（omp 那条）。
+
+def slots(conf_path=CONF):
+    """面板上的几家，按顺序。config.json 里的 quota_slots 写坏了（不是列表、有不认得的、有重复、超过 4 家）就用默认。"""
+    try:
+        want = json.loads(Path(conf_path).read_text(encoding="utf-8")).get("quota_slots")
+    except (OSError, ValueError, AttributeError):
+        want = None
+    ok = (isinstance(want, list) and 0 < len(want) <= 4 and all(isinstance(k, str) and k in PROVIDERS for k in want)
+          and len(set(want)) == len(want))
+    return list(want) if ok else list(DEFAULT_SLOTS)
+
+# 四家都优先直接问 magpie（它自己就在读各家订阅的额度）；问不到的窗口（比如 Grok Build）再用本机快照（RYUO_QUOTA_SNAPSHOT 那份）。
 # magpie 一次要问好几家，十几秒，所以结果缓存几分钟，推送程序每分钟要数据时不用每次都问。
 MAGPIE_CACHE = Path.home() / ".local/share/ryuo-studio/magpie-accounts.json"
 MAGPIE_TTL_S = 240
@@ -150,13 +170,14 @@ def main():
             for p in snap.get("providers", []) for w in p["windows"]}
     if a.stale_minutes is None:
         wins.update(magpie_windows())
-    main_ids = [pick[3] for pick in PICK if pick[3] in wins]
+    picks = [(k, *PROVIDERS[k]) for k in slots()]
+    main_ids = [pick[2] for pick in picks if pick[2] in wins]
     seen = [wins[i]["observed_at_ms"] for i in main_ids]
     gen = max(seen) if seen else snap_gen  # 整块面板的「更新时间」看最新的那家，个别过期的在那一行里单独标
     now = gen + a.stale_minutes * 60000 if a.stale_minutes is not None else int(time.time() * 1000)
 
     rows = []
-    for key, name, _prov, wid, sub, second in PICK:
+    for key, name, wid, sub, second in picks:
         w = wins.get(wid)
         if not w or w.get("used_pct") is None:
             rows.append({"key": key, "name": name, "sub": sub, "missing": True})

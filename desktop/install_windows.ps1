@@ -13,6 +13,8 @@
 #   -TaskPath '\RyuoStudio\'   任务放在哪个文件夹，默认根目录 '\'
 #   -AdbPath  C:\...\adb.exe    adb 不在 PATH 上时指过去
 #   -FailureHook C:\...\x.ps1   任务非正常退出时调用它：-Source ryuo-studio-<名字> -Reason <一句话> -LogPath <日志>
+#   -PwshPath C:\...\pwsh.exe   任务用哪个 pwsh.exe，默认是正在跑本脚本的这个。商店版 PowerShell 的真实路径带版本号，
+#                               商店一升级旧目录就没了、任务起不来；有固定路径的安装（MSI 或 zip）时指过去
 #
 # 装好以后屏幕照样是演练模式：真正上屏只看 ~/.config/ryuo-studio/config.json 里的 device_enabled，本脚本不改它。
 [CmdletBinding()]
@@ -25,6 +27,7 @@ param(
     [string]$TaskPath = '\',
     [string]$AdbPath = '',
     [string]$FailureHook = '',
+    [string]$PwshPath = '',
     [switch]$SkipSync
 )
 
@@ -61,8 +64,13 @@ if ($Uninstall) {
 }
 
 # 计划任务要钉到真实的 pwsh.exe（商店版的执行别名会让计划任务找不到它）
-$Pwsh = (Get-Process -Id $PID).Path
-if ([IO.Path]::GetFileName($Pwsh) -ne 'pwsh.exe') { throw '请用 PowerShell 7（pwsh）运行本脚本。' }
+$Pwsh = if ($PwshPath) { $PwshPath } else { (Get-Process -Id $PID).Path }
+if ([IO.Path]::GetFileName($Pwsh) -ne 'pwsh.exe' -or -not (Test-Path -LiteralPath $Pwsh)) {
+    throw "要 PowerShell 7 的 pwsh.exe：$Pwsh（用 pwsh 运行本脚本，或用 -PwshPath 指过去）。"
+}
+if ($Pwsh -like '*\WindowsApps\*') {
+    Write-Warning "任务会钉在商店版 PowerShell 带版本号的路径上：$Pwsh。商店升级 PowerShell 后这个目录会被删掉，任务就起不来了；有固定路径的安装时用 -PwshPath 指过去。"
+}
 
 $uv = (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 if (-not $uv) { throw '没找到 uv：先装 uv（https://docs.astral.sh/uv/），Python 由它管。' }

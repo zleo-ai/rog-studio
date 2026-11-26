@@ -107,15 +107,19 @@ There was no RYUO IV attached here, so there is no live screencap. That view app
 
 **Pictures, used for the full-screen layout and as a fallback.** On the configured interval the host reads a quota snapshot, paints a frame in the current theme, `adb push`es it to `/sdcard/pcMedia/`, and sends one HID `config` so the screen reloads. Each round uses a new file name. Overwriting the same name does not refresh the picture.
 
+In split layout the left zone (1606×1080) plays a video when there is one and otherwise shows the theme's static `themes/<theme>/assets/main.jpg`; the strip image is never stretched across it. The screen's own time and temperature readouts sit on the left zone; `split_slots` changes them and `[]` turns them all off.
+
 Both paths need a heartbeat every second (CPU and GPU temperature). After about 10 seconds without one, the screen returns to standby. The pusher sends it from the background.
 
 ## Where the numbers come from
 
 `tools/snapshot.py` asks magpie (`magpie accounts --json`) when it is installed, then fills any missing windows from a snapshot JSON. Point `RYUO_QUOTA_SNAPSHOT` at the file. The default path is `~/.local/state/aios/quota-snapshot.json`. The shape is `{"generated_at_ms", "providers":[{"windows":[{"id","used_pct","resets_at_ms", ...}]}]}`. Window ids are listed at the top of `snapshot.py`.
 
-With neither source, the panel does not invent numbers. `snapshot.py` currently exits because it has no window to rank, and the manager's preview render fails. The manager page, theme switching, and the driver dry-run still work.
+The four slots default to Claude, Codex, Grok, and Cursor. To swap one out, set `"quota_slots": ["claude", "agy", "grok", "cursor"]` in `config.json` (slot order, up to four; known keys are `claude` `codex` `grok` `cursor` `agy`). Remove the key to go back to the default. The `agy` slot is labelled Gemini and uses the Gemini icon. It has no numbers yet: magpie's `agy-cli` has not reported a quota window, so that slot says 暂无数据 ("no data").
 
-The four product icons are trademarks and are not in the git tree. `bash tools/fetch_logos.sh` downloads them locally. Without the files, the panel prints the names only.
+When a provider could not be read this time, its slot stays in place with a dash and 暂无数据. Nothing is made up and no provider silently disappears. With neither source, the panel does not invent numbers. `snapshot.py` currently exits because it has no window to rank, and the manager's preview render fails. The manager page, theme switching, and the driver dry-run still work.
+
+The product icons are trademarks and are not in the git tree. `bash tools/fetch_logos.sh` downloads them locally. Without the files, the panel prints the names only.
 
 ## Adding a theme
 
@@ -155,6 +159,7 @@ The manager writes `~/.config/ryuo-studio/config.json`.
 | `panel_width` | `634` | Panel width in pixels. 634 is the curved segment |
 | `panel_glass` | `true` | Clear glass: video underneath, panel on top |
 | `hud` / `hud_items` | on, `cpu` `gpu` `mem` | Clock and load drawn on the left |
+| `split_slots` | `Date&Time` `CPU Temperature` | The screen's own readouts in picture split mode (6 fixed positions, index is position); `[]` turns them off |
 
 Logs and rendered frames live in `~/.local/share/ryuo-studio/`.
 
